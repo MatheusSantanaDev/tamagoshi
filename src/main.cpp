@@ -115,6 +115,26 @@ unsigned long lastInteraction = 0;
 unsigned long previousMillis = 0;
 unsigned long accumulatedDelta = 0;  // Delta acumulado para update do Pokémon
 
+// Assinatura dos dados exibidos na tela de status. Quando muda (minuto a
+// minuto), a tela e redesenhada; os segundos do relogio usam refresh parcial.
+uint32_t lastStatsFp = 0;
+
+static uint32_t statsFingerprint() {
+    uint32_t h = 2166136261u;
+    h = (h ^ (uint32_t)pet.getStage()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getAge()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getWarmth()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getIncubationProgress()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getHunger()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getHappiness()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getHealth()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getLostCount()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getWinCount()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getShortestLife()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getLongestLife()) * 16777619u;
+    return h;
+}
+
 // ============================================================
 // Sleep mode (futuro: deep sleep)
 // ============================================================
@@ -254,6 +274,11 @@ void loop() {
         }
     }
 
+    // Relogio: segundos passam com refresh parcial (sem rebuild da tela)
+    if (gameState == STATE_STATS) {
+        display.drawClockTick(epochNow());
+    }
+
     delay(10);
     return;
 #endif
@@ -341,7 +366,21 @@ void loop() {
     // 3. DISPLAY
     // ========================================
     bool forceUpdate = (action != ACTION_NONE);
-    if (forceUpdate || (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS)) {
+    bool needRedraw = forceUpdate;
+
+    if (gameState == STATE_STATS) {
+        // Tela de status: redesenha so quando os dados mudam (1x/min).
+        // Os segundos do relogio sao atualizados via refresh parcial.
+        uint32_t fp = statsFingerprint();
+        if (fp != lastStatsFp) {
+            lastStatsFp = fp;
+            needRedraw = true;
+        }
+    } else if (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS) {
+        needRedraw = true;
+    }
+
+    if (needRedraw) {
         lastDisplayUpdate = now;
 
         switch (gameState) {
@@ -363,6 +402,11 @@ void loop() {
             default:
                 break;
         }
+    }
+
+    // Relogio: segundos passam com refresh parcial (sem rebuild da tela)
+    if (gameState == STATE_STATS) {
+        display.drawClockTick(epochNow());
     }
 
     // ========================================

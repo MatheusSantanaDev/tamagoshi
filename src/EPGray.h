@@ -36,14 +36,25 @@ public:
     // Overlay 1bpp row-major (bit=1 -> preto), full screen
     void overlay1bpp(const uint8_t* data, int16_t w, int16_t h);
 
+    // Regiao da tela como branco (0b11) no framebuffer
+    void clearRegion(int16_t x, int16_t y, int16_t w, int16_t h);
+
+    // Overlay 1bpp apenas em uma regiao (para refresh parcial)
+    void overlay1bppRect(const uint8_t* data, int16_t x, int16_t y,
+                         int16_t w, int16_t h);
+
     // Envia fb -> display (init + refresh completo + power off)
     void push();
+
+    // Refresh parcial de uma janela (relogio, sem reconstruir a tela)
+    void pushWindow(int16_t x, int16_t y, int16_t w, int16_t h);
 
     void powerOff();
 
 private:
-    uint8_t _fb[GRAY_FB_BYTES];
-    uint8_t _plane[GRAY_PLANE_BYTES];
+    uint8_t _fb[GRAY_FB_BYTES];     // Framebuffer 2bpp persistente
+    uint8_t _plane[GRAY_PLANE_BYTES];  // Plano "old" (MSBs) p/ envio
+    uint8_t _plane2[GRAY_PLANE_BYTES]; // Plano "new" (LSBs) p/ envio
 
     void sendCmd(uint8_t c);
     void sendData(const uint8_t* d, size_t n);

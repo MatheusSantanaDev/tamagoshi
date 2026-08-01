@@ -21,7 +21,9 @@
 
 EPDisplay::EPDisplay()
     : _epd(nullptr), _graySprite(nullptr), _grayX(0), _grayY(0),
-      _grayW(0), _grayH(0), _graySpriteSet(false) {}
+      _grayW(0), _grayH(0), _graySpriteSet(false),
+      _clockX(72), _clockY(36), _clockW(96), _clockH(18),
+      _lastClockSec(-1) {}
 
 void EPDisplay::begin() {
     initDisplay();
@@ -213,108 +215,166 @@ void EPDisplay::drawPet(const Pokemon& pet) {
 // ============================================================
 // Tela de status detalhado
 // ============================================================
+
+// Formata idade em minutos: "12min" ou "2h30min"
+static void formatAge(char* buf, size_t n, int minutes) {
+    if (minutes < 60) {
+        snprintf(buf, n, "%dmin", minutes);
+    } else {
+        snprintf(buf, n, "%dh%02dmin", minutes / 60, minutes % 60);
+    }
+}
+
+// Nome curto do estagio (os nomes "Mega ..." nao cabem na coluna de valores)
+static const char* shortStageName(PokemonStage stage) {
+    switch (stage) {
+        case STAGE_MEGASCIZOR:  return "MegaScizor";
+        case STAGE_MEGARAICHUX: return "MegaRaichuX";
+        case STAGE_MEGARAICHUY: return "MegaRaichuY";
+        default:                return STAGE_NAMES[stage];
+    }
+}
+
 void EPDisplay::drawStats(const Pokemon& pet, time_t now) {
     _epd->setFullWindow();
     _epd->fillScreen(GxEPD_WHITE);
 
+    // Titulo (FreeMono 12pt: 14px por caractere monoespacado)
     _epd->setFont(&FreeMonoBold12pt7b);
-    _epd->setCursor(centerX(120), 25);
+    _epd->setCursor(centerX(10 * 14), 25);
     _epd->print("== STATUS ==");
 
-    // Relogio real no canto superior direito (se NTP sincronizado)
+    // Relogio logo abaixo do titulo
     if (now > 0) {
         struct tm tm;
         localtime_r(&now, &tm);
-        char buf[9];
-        snprintf(buf, sizeof(buf), "%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec);
+        char clock[9];
+        snprintf(clock, sizeof(clock), "%02d:%02d:%02d",
+                 tm.tm_hour, tm.tm_min, tm.tm_sec);
         _epd->setFont(&FreeMonoBold9pt8b);
-        _epd->setCursor(DISPLAY_WIDTH - 72, 25);
-        _epd->print(buf);
+        _epd->setCursor(centerX(8 * 11), 48);
+        _epd->print(clock);
+        _lastClockSec = tm.tm_sec;
     }
 
-    _epd->setFont(&FreeMonoBold9pt8b);
-    int y = 55;
+    // Lista de infos (rotulo em 10, valor em 112; rotulo max 9 chars)
+    const int labelX = 10;
+    const int valueX = 112;
+    const int lineH = 19;
+    int y = 78;
+    char buf[16];
 
-    // Nome
-    _epd->setCursor(10, y);
-    _epd->print("Pokemon: ");
-    _epd->print(pet.getStageName());
-    y += 20;
+    _epd->setFont(&FreeMonoBold9pt8b);
+
+    // Pokemon
+    _epd->setCursor(labelX, y);
+    _epd->print("Pokemon:");
+    _epd->setCursor(valueX, y);
+    _epd->print(shortStageName(pet.getStage()));
+    y += lineH;
 
     // Idade
-    _epd->setCursor(10, y);
-    _epd->printf("Idade: %d min", pet.getAge());
-    y += 25;
+    _epd->setCursor(labelX, y);
+    _epd->print("Idade:");
+    formatAge(buf, sizeof(buf), pet.getAge());
+    _epd->setCursor(valueX, y);
+    _epd->print(buf);
+    y += lineH;
 
     if (pet.isEgg()) {
-        // === OVO ===
-        _epd->setCursor(10, y);
+        // Ovo: progresso em texto (sem barras)
+        _epd->setCursor(labelX, y);
         _epd->print("Calor:");
-        drawProgressBar(90, y - 10, DISPLAY_WIDTH - 100, BAR_H,
-                        pet.getWarmth(), STATS_MAX, GxEPD_BLACK);
-        _epd->setCursor(DISPLAY_WIDTH - 30, y);
-        _epd->printf("%d", pet.getWarmth());
-        y += 22;
+        _epd->setCursor(valueX, y);
+        _epd->printf("%d/%d", pet.getWarmth(), STATS_MAX);
+        y += lineH;
 
-        _epd->setCursor(10, y);
+        _epd->setCursor(labelX, y);
         _epd->print("Choco:");
-        drawProgressBar(90, y - 10, DISPLAY_WIDTH - 100, BAR_H,
-                        pet.getIncubationProgress(), HATCH_TIME_MINUTES, GxEPD_BLACK);
-        _epd->setCursor(DISPLAY_WIDTH - 30, y);
-        _epd->printf("%d", pet.getIncubationProgress());
-        y += 30;
-
-        _epd->setCursor(10, y);
-        _epd->print("Btn1=Aquecer");
-        y += 15;
-        _epd->setCursor(10, y);
-        _epd->print("Btn2=Ajudar");
-        y += 15;
-        _epd->setCursor(10, y);
-        _epd->print("Btn3=Status");
-        y += 15;
-        _epd->setCursor(10, y);
-        _epd->print("Btn3(L)=Reset");
+        _epd->setCursor(valueX, y);
+        _epd->printf("%d/%d min", pet.getIncubationProgress(), HATCH_TIME_MINUTES);
+        y += lineH;
     } else {
-        // === POKEMON NORMAL ===
-        _epd->setCursor(10, y);
-        _epd->print("Fome:");
-        drawProgressBar(90, y - 10, DISPLAY_WIDTH - 100, BAR_H,
-                        pet.getHunger(), STATS_MAX, GxEPD_BLACK);
-        _epd->setCursor(DISPLAY_WIDTH - 30, y);
-        _epd->printf("%d", pet.getHunger());
-        y += 22;
+        // Humor e estado
+        _epd->setCursor(labelX, y);
+        _epd->print("Humor:");
+        _epd->setCursor(valueX, y);
+        _epd->print(pet.getMood());
+        y += lineH;
 
-        _epd->setCursor(10, y);
-        _epd->print("Fel.:");
-        drawProgressBar(90, y - 10, DISPLAY_WIDTH - 100, BAR_H,
-                        pet.getHappiness(), STATS_MAX, GxEPD_BLACK);
-        _epd->setCursor(DISPLAY_WIDTH - 30, y);
-        _epd->printf("%d", pet.getHappiness());
-        y += 22;
+        _epd->setCursor(labelX, y);
+        _epd->print("Estado:");
+        _epd->setCursor(valueX, y);
+        _epd->print(pet.getState());
+        y += lineH;
+    }
 
-        _epd->setCursor(10, y);
-        _epd->print("Saud.:");
-        drawProgressBar(90, y - 10, DISPLAY_WIDTH - 100, BAR_H,
-                        pet.getHealth(), STATS_MAX, GxEPD_BLACK);
-        _epd->setCursor(DISPLAY_WIDTH - 30, y);
-        _epd->printf("%d", pet.getHealth());
-        y += 30;
+    // Historico permanente (nao reseta)
+    _epd->setCursor(labelX, y);
+    _epd->print("Perdidos:");
+    _epd->setCursor(valueX, y);
+    _epd->print(pet.getLostCount());
+    y += lineH;
 
-        _epd->setCursor(10, y);
-        _epd->print("Btn1=Alimentar");
-        y += 15;
-        _epd->setCursor(10, y);
-        _epd->print("Btn2=Brincar");
-        y += 15;
-        _epd->setCursor(10, y);
-        _epd->print("Btn3=Status");
-        y += 15;
-        _epd->setCursor(10, y);
-        _epd->print("Btn3(L)=Reset");
+    _epd->setCursor(labelX, y);
+    _epd->print("Vitorias:");
+    _epd->setCursor(valueX, y);
+    _epd->print(pet.getWinCount());
+    y += lineH;
+
+    _epd->setCursor(labelX, y);
+    _epd->print("V.curta:");
+    _epd->setCursor(valueX, y);
+    if (pet.getShortestLife() > 0) {
+        formatAge(buf, sizeof(buf), pet.getShortestLife());
+        _epd->print(buf);
+    } else {
+        _epd->print("--");
+    }
+    y += lineH;
+
+    _epd->setCursor(labelX, y);
+    _epd->print("V.longa:");
+    _epd->setCursor(valueX, y);
+    if (pet.getLongestLife() > 0) {
+        formatAge(buf, sizeof(buf), pet.getLongestLife());
+        _epd->print(buf);
+    } else {
+        _epd->print("--");
     }
 
     refresh();
+}
+
+// ============================================================
+// Relogio em tempo real: atualiza somente a regiao dos digitos
+// (refresh parcial), sem reconstruir a tela inteira.
+// ============================================================
+void EPDisplay::drawClockTick(time_t now) {
+#if CLOCK_PARTIAL_UPDATE
+    struct tm tm;
+    localtime_r(&now, &tm);
+    if (tm.tm_sec == _lastClockSec) return;
+    _lastClockSec = tm.tm_sec;
+
+    char clock[9];
+    snprintf(clock, sizeof(clock), "%02d:%02d:%02d",
+             tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+    // Apaga os digitos antigos e desenha os novos (mesmo cursor do drawStats)
+    _epd->setFont(&FreeMonoBold9pt8b);
+    _epd->fillRect(_clockX, _clockY, _clockW, _clockH, GxEPD_WHITE);
+    _epd->setCursor(centerX(8 * 11), 48);
+    _epd->print(clock);
+
+#if GRAY_MODE
+    _gray.clearRegion(_clockX, _clockY, _clockW, _clockH);
+    _gray.overlay1bppRect(_epd->uiBuffer(), _clockX, _clockY, _clockW, _clockH);
+    _gray.pushWindow(_clockX, _clockY, _clockW, _clockH);
+#else
+    _epd->displayWindow(_clockX, _clockY, _clockW, _clockH);
+#endif
+#endif
 }
 
 // ============================================================
@@ -326,7 +386,7 @@ void EPDisplay::drawEvolution(const Pokemon& pet) {
 
     _epd->setFont(&FreeMonoBold12pt7b);
     const char* title = pet.getStage() == STAGE_SCYTHER ? "OVO CHOCANDO!" : "EVOLUINDO!";
-    _epd->setCursor(centerX(strlen(title) * 8), 30);
+    _epd->setCursor(centerX(strlen(title) * 14), 30);
     _epd->print(title);
 
     // Mostra sprite do estágio atual
@@ -354,7 +414,7 @@ void EPDisplay::drawWarning(const Pokemon& pet) {
     _epd->fillScreen(GxEPD_WHITE);
 
     _epd->setFont(&FreeMonoBold12pt7b);
-    _epd->setCursor(centerX(140), 30);
+    _epd->setCursor(centerX(strlen("!! CUIDADO !!") * 14), 30);
     _epd->print("!! CUIDADO !!");
 
     int y = 60;
@@ -407,7 +467,7 @@ void EPDisplay::drawSleeping() {
     _epd->fillScreen(GxEPD_WHITE);
 
     _epd->setFont(&FreeMonoBold12pt7b);
-    _epd->setCursor(centerX(160), centerY(10));
+    _epd->setCursor(centerX(strlen("Zzzzzz...") * 14), centerY(10));
     _epd->print("Zzzzzz...");
 
     refresh();
@@ -421,7 +481,7 @@ void EPDisplay::drawDead(const Pokemon& pet) {
     _epd->fillScreen(GxEPD_WHITE);
 
     _epd->setFont(&FreeMonoBold12pt7b);
-    _epd->setCursor(centerX(140), 30);
+    _epd->setCursor(centerX(strlen("--- SEM VIDAS ---") * 14), 30);
     _epd->print("--- SEM VIDAS ---");
 
     _epd->setFont(&FreeMonoBold9pt8b);
@@ -454,15 +514,15 @@ void EPDisplay::showMessage(const char* line1, const char* line2, const char* li
 
     _epd->setFont(&FreeMonoBold12pt7b);
     if (line1) {
-        _epd->setCursor(centerX(strlen(line1) * 8), 40);
+        _epd->setCursor(centerX(strlen(line1) * 14), 40);
         _epd->print(line1);
     }
     if (line2) {
-        _epd->setCursor(centerX(strlen(line2) * 8), 70);
+        _epd->setCursor(centerX(strlen(line2) * 14), 70);
         _epd->print(line2);
     }
     if (line3) {
-        _epd->setCursor(centerX(strlen(line3) * 8), 100);
+        _epd->setCursor(centerX(strlen(line3) * 14), 100);
         _epd->print(line3);
     }
 

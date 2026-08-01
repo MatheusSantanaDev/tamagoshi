@@ -48,6 +48,10 @@ public:
     void drawSleeping();
     void drawDead(const Pokemon& pet);
 
+    // Atualiza apenas os digitos do relogio da tela de stats
+    // (refresh parcial da regiao, sem reconstruir a tela inteira)
+    void drawClockTick(time_t now);
+
     // Utilitários
     void drawSprite(int16_t x, int16_t y, const unsigned char* bitmap,
                     int16_t w, int16_t h, uint16_t color);
@@ -74,6 +78,10 @@ private:
     const uint8_t* _graySprite;
     int16_t _grayX, _grayY, _grayW, _grayH;
     bool _graySpriteSet;
+
+    // Regiao do relogio na tela de status (refresh parcial)
+    int _clockX, _clockY, _clockW, _clockH;
+    int _lastClockSec;
 
     void initDisplay();
     int centerX(int width) const;

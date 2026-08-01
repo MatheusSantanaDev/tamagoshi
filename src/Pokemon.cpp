@@ -10,7 +10,8 @@ Pokemon::Pokemon()
     : _stage(STAGE_EGG), _hunger(80), _happiness(70),
       _health(100), _warmth(50), _incubationMinutes(0),
       _ageMinutes(0), _isAlive(true), _minutesAtCurrentStage(0),
-      _lastTickEpoch(0) {}
+      _lastTickEpoch(0), _lostCount(0), _winCount(0),
+      _shortestLife(0), _longestLife(0) {}
 
 void Pokemon::begin(time_t now) {
     load();
@@ -127,9 +128,17 @@ void Pokemon::tickMinute() {
             _health = min(_health + 2, STATS_MAX);
         }
 
-        if (_health <= 0) {
+        // Velhice: nos estagios finais o Pokemon morre naturalmente
+        bool isFinalStage = (_stage == STAGE_KLEAVOR ||
+                             _stage == STAGE_MEGARAICHUX ||
+                             _stage == STAGE_MEGARAICHUY);
+        if (isFinalStage && _ageMinutes >= MAX_LIFE_MINUTES) {
+            _isAlive = false;
+            recordLife(true);
+        } else if (_health <= 0) {
             _isAlive = false;
             _health = 0;
+            recordLife(false);
         }
     }
 
@@ -426,6 +435,58 @@ bool Pokemon::isDead() const {
     return !_isAlive;
 }
 
+// Humor: comportamento momentaneo. Felicidade ajustada por saude/fome
+// (um pokemon doente ou faminto fica pior do que a felicidade indica).
+const char* Pokemon::getMood() const {
+    if (!_isAlive) return "Sem vida";
+    if (_stage == STAGE_EGG) return "Intrigado";
+
+    int score = _happiness;
+    if (_health < 30) score -= 30;
+    if (_hunger < 20) score -= 20;
+    if (_health > 60 && _hunger > 60) score += 10;
+
+    if (score >= 80) return "Euforico";
+    if (score >= 60) return "Animado";
+    if (score >= 40) return "Calmo";
+    if (score >= 20) return "Aborrecido";
+    return "Deprimido";
+}
+
+// Estado: condicao geral, prioridade da pior situacao
+const char* Pokemon::getState() const {
+    if (!_isAlive) return "Morto";
+    if (_stage == STAGE_EGG) return "Incubando";
+    if (_hunger <= 20) return "Faminto";
+    if (_happiness <= 20) return "Irritado";
+    if (_health <= 30) return "Doente";
+    if (_happiness <= 40) return "Triste";
+    if (_hunger <= 40) return "Com fome";
+    return "Feliz";
+}
+
+// Registra o fim de uma vida no historico permanente
+void Pokemon::recordLife(bool victory) {
+    if (victory) {
+        _winCount++;
+        Serial.printf("[LIFE] Velhice - VITORIA! (%d)\n", _winCount);
+    } else {
+        _lostCount++;
+        Serial.printf("[LIFE] Descuido - PERDA! (%d)\n", _lostCount);
+    }
+
+    if (_shortestLife == 0 || _ageMinutes < _shortestLife) {
+        _shortestLife = _ageMinutes;
+    }
+    if (_ageMinutes > _longestLife) {
+        _longestLife = _ageMinutes;
+    }
+
+    Serial.printf("[LIFE] Vida: %dmin (curta:%d longa:%d)\n",
+                  _ageMinutes, _shortestLife, _longestLife);
+    save();
+}
+
 // ============================================================
 // NVS Save/Load
 // ============================================================
@@ -448,6 +509,12 @@ void Pokemon::save() {
     nvs_set_i32(handle, "age", _ageMinutes);
     nvs_set_i32(handle, "stageMins", _minutesAtCurrentStage);
     nvs_set_u8(handle, "alive", _isAlive ? 1 : 0);
+
+    // Historico permanente (nao reseta junto com o Pokemon)
+    nvs_set_i32(handle, "lost", _lostCount);
+    nvs_set_i32(handle, "wins", _winCount);
+    nvs_set_i32(handle, "shortLife", _shortestLife);
+    nvs_set_i32(handle, "longLife", _longestLife);
 
     // Marca o instante deste save para o catch-up no proximo boot.
     // So grava com relogio sincronizado (NTP): com o relogio padrao
@@ -506,6 +573,18 @@ void Pokemon::load() {
     }
     if (nvs_get_i64(handle, "lastTick", &i64val) == ESP_OK) {
         _lastTickEpoch = (time_t)i64val;
+    }
+    if (nvs_get_i32(handle, "lost", &i32val) == ESP_OK) {
+        _lostCount = i32val;
+    }
+    if (nvs_get_i32(handle, "wins", &i32val) == ESP_OK) {
+        _winCount = i32val;
+    }
+    if (nvs_get_i32(handle, "shortLife", &i32val) == ESP_OK) {
+        _shortestLife = i32val;
+    }
+    if (nvs_get_i32(handle, "longLife", &i32val) == ESP_OK) {
+        _longestLife = i32val;
     }
 
     nvs_close(handle);

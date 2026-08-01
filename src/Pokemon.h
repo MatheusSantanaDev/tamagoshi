@@ -54,6 +54,16 @@ public:
     bool isCritical() const;
     bool isDead() const;
 
+    // Humor (comportamento momentaneo) e Estado (condicao geral)
+    const char* getMood() const;
+    const char* getState() const;
+
+    // Historico permanente (sobrevive ao reset do Pokemon)
+    int getLostCount() const { return _lostCount; }
+    int getWinCount() const { return _winCount; }
+    int getShortestLife() const { return _shortestLife; }
+    int getLongestLife() const { return _longestLife; }
+
 private:
     PokemonStage _stage;
     int _hunger;
@@ -66,7 +76,13 @@ private:
     unsigned long _minutesAtCurrentStage;
     time_t _lastTickEpoch;   // Ultimo segundo de jogo salvo (para catch-up)
 
+    int32_t _lostCount;      // Mortes por descuido (fome, tristeza, doenca)
+    int32_t _winCount;       // Mortes de velhice (chegou ao estagio final)
+    int32_t _shortestLife;   // Vida mais curta (minutos)
+    int32_t _longestLife;    // Vida mais longa (minutos)
+
     void tickMinute();
+    void recordLife(bool victory);
     void clampStats();
     void evolve();
 };
