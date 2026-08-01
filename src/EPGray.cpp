@@ -268,7 +268,13 @@ void EPGray::pushWindow(int16_t x, int16_t y, int16_t w, int16_t h) {
     sendCmd(0x91);
     setWindow();
     sendCmd(0x50);
-    sendData(0xD7);             // VCOM/data interval - borda flutuante
+    // 0x50: VBD[1:0] DDX[1:0] - CDI[2:0]
+    // 0xD7 (VBD=11) empurra a borda (tudo fora da janela) para VCOM a cada
+    // refresh parcial - foi o que gerou a linha no extremo inferior da tela.
+    // 0x17 (VBD=00, DDX=01) deixa a borda FLUTUANTE (hi-Z): nada fora da
+    // janela e dirigido, entao a linha some e o ghosting de 1px na borda da
+    // janela nao acontece (os pixels de fora nem sao mexidos).
+    sendData(0x17);             // VCOM/data interval - borda flutuante
     sendCmd(0x12);   // refresh - apenas a regiao da janela
     delay(1);
     waitBusy("pwin refresh");

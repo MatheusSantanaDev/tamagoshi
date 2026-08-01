@@ -101,14 +101,21 @@ private:
     void pushPartialRegion(int16_t x, int16_t y, int16_t w, int16_t h);
     void updateBarPartial(int row, const char* label, int value, int maxVal);
     void updatePoopsPartial(const Pokemon& pet);
-    void updateAgePartial(const Pokemon& pet);
+    void updateLvlPartial(const Pokemon& pet);
+    void updateMsgPartial(const Pokemon& pet);
+    // Caixa exata dos digitos de "lvl N" (o prefixo "lvl " nao muda)
+    void lvlNumberBounds(int lvl, int16_t& tx0, int16_t& ty0,
+                         uint16_t& tw, uint16_t& th);
 
     // Snapshot da tela do pet (para saber o que mudou)
-    int _lastPetAge;
+    int _lastPetLvl;
     int _lastPetBars[6];
     int _lastPetDirt;
     const unsigned char* _lastPetSprite;
     char _lastPetMsg[24];
+
+    // Caixa do texto "lvl N" (refresh parcial justo, sem piscar area maior)
+    int _lastLvlX = 0, _lastLvlW = 0;
 };
 
 #endif

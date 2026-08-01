@@ -12,11 +12,12 @@
 static void formatAge(char* buf, size_t n, int minutes);  // definida abaixo
 
 // Barras da tela do pet: linha i (0=baixo, 5=topo).
-// PET_BAR_X multiplo de 8: a janela parcial (byte-alinhada a 8px) cobre
-// exatamente a barra, sem margem sobrando de um lado (evita ghosting).
+// PET_BAR_X e PET_BAR_W multiplos de 8: a janela parcial (byte-alinhada a
+// 8px) cobre exatamente a barra, sem margem sobrando de lado (evita linha
+// de ghosting no canto inferior).
 #define PET_BAR_LABEL_X 10
 #define PET_BAR_X       72
-#define PET_BAR_W       (DISPLAY_WIDTH - 10 - PET_BAR_X)
+#define PET_BAR_W       (DISPLAY_WIDTH - PET_BAR_X - 8)
 #define PET_BAR_H       9
 #define PET_BAR_GAP     16
 #define PET_BARS_BOTTOM (DISPLAY_HEIGHT - 8)
@@ -47,7 +48,7 @@ EPDisplay::EPDisplay()
     : _epd(nullptr), _graySprite(nullptr), _grayX(0), _grayY(0),
       _grayW(0), _grayH(0), _graySpriteSet(false),
       _clockX(72), _clockY(36), _clockW(96), _clockH(18),
-      _lastClockSec(-1), _lastPetAge(-1), _lastPetDirt(-1),
+      _lastClockSec(-1), _lastPetLvl(-1), _lastPetDirt(-1),
       _lastPetSprite(nullptr) {
     memset(_lastPetBars, -1, sizeof(_lastPetBars));
     _lastPetMsg[0] = '\0';
@@ -195,7 +196,7 @@ void EPDisplay::drawPoops(const Pokemon& pet) {
 
 // Regioes (esq/dir) dos cocos ao lado do sprite
 void EPDisplay::snapshotPet(const Pokemon& pet) {
-    _lastPetAge = pet.getAge();
+    _lastPetLvl = pet.getLvl();
     _lastPetSprite = pet.getCurrentSprite();
     _lastPetDirt = pet.getDirt() / DIRT_LEVEL_STEP;
     strncpy(_lastPetMsg, petStatusMessage(pet), sizeof(_lastPetMsg) - 1);
@@ -216,6 +217,14 @@ void EPDisplay::snapshotPet(const Pokemon& pet) {
         _lastPetBars[4] = pet.getSleep();
         _lastPetBars[5] = pet.getHygiene();
     }
+
+    // Caixa exata dos digitos do "lvl N" (o prefixo "lvl " nunca muda; so
+    // o numero e atualizado no refresh parcial)
+    int16_t tx0, ty0;
+    uint16_t tw, th;
+    lvlNumberBounds(pet.getLvl(), tx0, ty0, tw, th);
+    _lastLvlX = tx0;
+    _lastLvlW = tw;
 }
 
 void EPDisplay::drawPet(const Pokemon& pet) {
@@ -227,10 +236,10 @@ void EPDisplay::drawPet(const Pokemon& pet) {
     _epd->setCursor(10, 18);
     _epd->print(pet.getStageName());
 
-    // Nivel (lvl = idade em minutos inteiros, atualiza 1x/min)
+    // Nivel (lvl = tempo de vida do estagio, atualiza conforme avanca)
     _epd->setFont(&FreeMonoBold9pt8b);
     _epd->setCursor(10, 34);
-    _epd->printf("lvl %d", pet.getAge());
+    _epd->printf("lvl %d", pet.getLvl());
 
     // Sprite ancorado pela BASE (cresce para cima, usando o espaco do topo).
     // Base fixa em SPRITE_BOTTOM; o topo sobe conforme o tamanho do estagio.
@@ -303,7 +312,6 @@ void EPDisplay::updateBarPartial(int row, const char* label, int value, int maxV
 
     // Reescreve o interior inteiro (preenchimento todo) de uma vez: atualizar
     // so o pedacinho que mudou deixa residuos (ghosting) no e-paper.
-    // A borda (1px nas extremidades) nunca e tocada - nao pisca.
     int newFillW = map(constrain(value, 0, maxVal), 0, maxVal, 0, PET_BAR_W - 2);
 
     _epd->fillRect(PET_BAR_X + 1, top + 1, PET_BAR_W - 2, PET_BAR_H - 2, GxEPD_WHITE);
@@ -311,19 +319,93 @@ void EPDisplay::updateBarPartial(int row, const char* label, int value, int maxV
         _epd->fillRect(PET_BAR_X + 1, top + 1, newFillW, PET_BAR_H - 2, GxEPD_BLACK);
     }
 
-    pushPartialRegion(PET_BAR_X + 1, top + 1, PET_BAR_W - 2, PET_BAR_H - 2);
+    // Push da barra INTEIRA (borda + interior): a area recarregada coincide
+    // exatamente com a barra.
+    pushPartialRegion(PET_BAR_X, top, PET_BAR_W, PET_BAR_H);
     _lastPetBars[row] = value;
 }
 
-void EPDisplay::updateAgePartial(const Pokemon& pet) {
-    // Regiao do lvl (abaixo do nome) - atualiza so este campo
-    _epd->fillRect(6, 24, 120, 16, GxEPD_WHITE);
+void EPDisplay::updateLvlPartial(const Pokemon& pet) {
+    char lvlBuf[16];
+    snprintf(lvlBuf, sizeof(lvlBuf), "lvl %d", pet.getLvl());
+
+    int16_t tx0, ty0;
+    uint16_t tw, th;
+    lvlNumberBounds(pet.getLvl(), tx0, ty0, tw, th);
+
+    // Limpa apenas a uniao das caixas dos digitos (antiga x nova): o
+    // prefixo "lvl " nunca e tocado.
+    int cx = _lastLvlX < 0 ? tx0 : (tx0 < _lastLvlX ? tx0 : _lastLvlX);
+    int cw = tw > _lastLvlW ? (int)tw : _lastLvlW;
+    _epd->fillRect(cx, ty0, cw, th, GxEPD_WHITE);
     _epd->setFont(&FreeMonoBold9pt8b);
     _epd->setCursor(10, 34);
-    _epd->printf("lvl %d", pet.getAge());
+    _epd->print(lvlBuf);
+    pushPartialRegion(cx, ty0, cw, th);
 
-    pushPartialRegion(6, 24, 120, 16);
-    _lastPetAge = pet.getAge();
+    _lastPetLvl = pet.getLvl();
+    _lastLvlX = tx0;
+    _lastLvlW = tw;
+}
+
+// Troca de frase (ex.: "Ovo esta frio!") com refresh parcial: so a regiao
+// centrada em SPRITE_BOTTOM+18 e atualizada, sem rebuild da pagina.
+void EPDisplay::updateMsgPartial(const Pokemon& pet) {
+    const char* msg = petStatusMessage(pet);
+    _epd->setFont(&FreeMonoBold9pt8b);
+
+    // Mesma posicao do drawPet: caixa centrada na linha SPRITE_BOTTOM+18.
+    // O topo dos glifos fica em cy + ty0 = SPRITE_BOTTOM + 18 (ty0 < 0).
+    int16_t tx0, ty0;
+    uint16_t tw, th;
+    _epd->getTextBounds(msg, 0, 0, &tx0, &ty0, &tw, &th);
+    int cx = (DISPLAY_WIDTH - tw) / 2;
+    int cy = SPRITE_BOTTOM + 18 - ty0;
+
+    // Uniao com a caixa da mensagem anterior (ambas centradas na mesma base)
+    int16_t ox0, oy0;
+    uint16_t ow, oh;
+    _epd->getTextBounds(_lastPetMsg, 0, 0, &ox0, &oy0, &ow, &oh);
+    int ocx = (DISPLAY_WIDTH - ow) / 2;
+
+    int ux = cx < ocx ? cx : ocx;
+    int uw = tw > ow ? (int)tw : (int)ow;
+    int uy = cy + ty0;             // = SPRITE_BOTTOM + 18 (mesmo para as duas)
+    int uh = th > oh ? (int)th : (int)oh;
+
+    _epd->fillRect(ux, uy, uw, uh, GxEPD_WHITE);
+    _epd->setCursor(cx, cy);
+    _epd->print(msg);
+    pushPartialRegion(ux, uy, uw, uh);
+
+    strncpy(_lastPetMsg, msg, sizeof(_lastPetMsg) - 1);
+    _lastPetMsg[sizeof(_lastPetMsg) - 1] = '\0';
+}
+
+// Caixa exata dos digitos de "lvl N", desenhado em (10, 34) com a fonte
+// FreeMono (monospace, avancos iguais). A altura cobre qualquer digito
+// (base sempre em 34+1), entao a uniao antigo/novo nao deixa residuo.
+void EPDisplay::lvlNumberBounds(int lvl, int16_t& tx0, int16_t& ty0,
+                                uint16_t& tw, uint16_t& th) {
+    // Avanco monospace: largura de "00" menos a de "0"
+    int16_t x0, y0;
+    uint16_t w0, w1, h0, h1;
+    _epd->setFont(&FreeMonoBold9pt8b);
+    _epd->getTextBounds("0", 10, 34, &x0, &y0, &w0, &h0);
+    _epd->getTextBounds("00", 10, 34, &x0, &y0, &w1, &h1);
+    int advance = (int)w1 - (int)w0;
+
+    // O numero comeca apos o prefixo fixo "lvl " (4 avancos)
+    char num[8];
+    snprintf(num, sizeof(num), "%d", lvl);
+    int16_t nx0, ny0;
+    uint16_t nw, nh;
+    _epd->getTextBounds(num, 10 + 4 * advance, 34, &nx0, &ny0, &nw, &nh);
+
+    tx0 = nx0;
+    ty0 = 34 - 11;
+    tw = nw;
+    th = 12;
 }
 
 void EPDisplay::updatePoopsPartial(const Pokemon& pet) {
@@ -360,16 +442,22 @@ void EPDisplay::updatePoopsPartial(const Pokemon& pet) {
 }
 
 void EPDisplay::drawPetUpdates(const Pokemon& pet) {
-    // Sprite (humor) ou mensagem mudou? -> redesenho completo
-    if (pet.getCurrentSprite() != _lastPetSprite ||
-        strcmp(petStatusMessage(pet), _lastPetMsg) != 0) {
+    // Sprite mudou? -> redesenho completo. (No ovo o sprite so muda ao
+    // chocar; esquentar/esfriar so troca a frase, abaixo.)
+    if (pet.getCurrentSprite() != _lastPetSprite) {
         drawPet(pet);
         return;
     }
 
-    // Idade
-    if (pet.getAge() != _lastPetAge) {
-        updateAgePartial(pet);
+    // Frase mudou (sem mudar o sprite)? -> refresh parcial so da frase
+    if (strcmp(petStatusMessage(pet), _lastPetMsg) != 0) {
+        updateMsgPartial(pet);
+    }
+
+    // Nivel (lvl = tempo de vida do estagio; no ovo pausa quando esfria,
+    // entao so redesenha quando o lvl realmente avanca)
+    if (pet.getLvl() != _lastPetLvl) {
+        updateLvlPartial(pet);
     }
 
     // Barras

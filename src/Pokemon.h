@@ -65,6 +65,13 @@ public:
 
     bool isEgg() const { return _stage == STAGE_EGG; }
 
+    // Nivel = tempo de vida do estagio atual. No ovo, so avanca enquanto
+    // incuba (pausa quando esfria); na Mega, pausa junto com o relogio do
+    // estagio final normal.
+    int getLvl() const {
+        return _stage == STAGE_EGG ? _incubationMinutes : (int)_minutesAtCurrentStage;
+    }
+
     // Sprite selection
     const unsigned char* getCurrentSprite() const;
 

@@ -523,16 +523,12 @@ const unsigned char* Pokemon::getCurrentSprite() const {
     }
 
     if (_stage == STAGE_EGG) {
+        // Sprite do ovo fica FIXO (IDLE) ao esquentar/esfriar: a mudanca de
+        // calor so troca a frase (refresh parcial). So o choco muda o sprite.
         if (_warmth >= WARMTH_FAST_MIN && _incubationMinutes >= HATCH_TIME_MINUTES) {
             return EGG_HATCHING;
         }
-        if (_warmth >= WARMTH_FAST_MIN) {
-            return EGG_WARM;
-        }
-        if (_warmth >= WARMTH_SLOW_MIN) {
-            return EGG_IDLE;
-        }
-        return EGG_COLD;
+        return EGG_IDLE;
     }
 
     bool isHappy = (_happiness >= 50);
@@ -586,16 +582,12 @@ const unsigned char* Pokemon::getCurrentGraySprite() const {
     }
 
     if (_stage == STAGE_EGG) {
+        // Sprite do ovo fica FIXO (IDLE) ao esquentar/esfriar: a mudanca de
+        // calor so troca a frase (refresh parcial). So o choco muda o sprite.
         if (_warmth >= WARMTH_FAST_MIN && _incubationMinutes >= HATCH_TIME_MINUTES) {
             return EGG_GRAY_HATCHING;
         }
-        if (_warmth >= WARMTH_FAST_MIN) {
-            return EGG_GRAY_WARM;
-        }
-        if (_warmth >= WARMTH_SLOW_MIN) {
-            return EGG_GRAY_IDLE;
-        }
-        return EGG_GRAY_COLD;
+        return EGG_GRAY_IDLE;
     }
 
     bool isHappy = (_happiness >= 50);
