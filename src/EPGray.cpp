@@ -184,19 +184,24 @@ void EPGray::push() {
 }
 
 void EPGray::pushWindow(int16_t x, int16_t y, int16_t w, int16_t h) {
-    // Alinha a janela aos limites de byte (8px) exigidos pelo controlador
-    x -= x % 8;
-    if (w % 8 > 0) w += 8 - w % 8;
-    if (x < 0) { w += x; x = 0; }
+    // Alinha a janela aos limites de byte (8px) exigidos pelo controlador:
+    // canto esquerdo para BAIXO e canto direito para CIMA. Se so o esquerdo
+    // for alinhado, o lado direito da regiao pode ficar de fora da janela
+    // (nunca e atualizado, deixando ghosting).
+    int16_t xr = x + w;               // borda direita (exclusiva)
+    x -= x % 8;                       // esquerda -> multiplo de 8
+    if (xr % 8) xr += 8 - xr % 8;     // direita  -> proximo multiplo de 8
+    if (x < 0) { xr += x; x = 0; }
+    if (xr > GRAY_W) xr = GRAY_W;
+    w = xr - x;
     if (w <= 0 || h <= 0) return;
-    if (x + w > GRAY_W) w = GRAY_W - x;
     if (y < 0) { h += y; y = 0; }
     if (h <= 0) return;
     if (y + h > GRAY_H) h = GRAY_H - y;
 
     init4G();
 
-    uint16_t xe = (x + w - 1) | 0x0007;
+    uint16_t xe = xr - 1;
     uint16_t ye = y + h - 1;
 
     auto setWindow = [&]() {

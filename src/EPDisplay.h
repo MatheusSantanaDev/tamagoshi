@@ -48,6 +48,10 @@ public:
     void drawSleeping();
     void drawDead(const Pokemon& pet);
 
+    // Tela do pet: atualiza apenas barras/cocos/idade que mudaram
+    // (refresh parcial por regiao, sem reconstruir a tela inteira)
+    void drawPetUpdates(const Pokemon& pet);
+
     // Atualiza apenas os digitos do relogio da tela de stats
     // (refresh parcial da regiao, sem reconstruir a tela inteira)
     void drawClockTick(time_t now);
@@ -87,6 +91,24 @@ private:
     int centerX(int width) const;
     int centerY(int height) const;
     void getSpriteSize(const Pokemon& pet, int16_t& w, int16_t& h) const;
+
+    // Tela do pet
+    void drawBarRow(int row, const char* label, int value, int maxVal);
+    void drawPoops(const Pokemon& pet);
+    void snapshotPet(const Pokemon& pet);
+
+    // Refreshes parciais
+    void pushPartialRegion(int16_t x, int16_t y, int16_t w, int16_t h);
+    void updateBarPartial(int row, const char* label, int value, int maxVal);
+    void updatePoopsPartial(const Pokemon& pet);
+    void updateAgePartial(const Pokemon& pet);
+
+    // Snapshot da tela do pet (para saber o que mudou)
+    int _lastPetAge;
+    int _lastPetBars[6];
+    int _lastPetDirt;
+    const unsigned char* _lastPetSprite;
+    char _lastPetMsg[24];
 };
 
 #endif

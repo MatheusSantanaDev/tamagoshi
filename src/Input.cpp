@@ -64,6 +64,8 @@ ButtonAction Input::read() {
                 btn->wasLongPress = true;
                 if (btn->pin == BTN_STATUS) {
                     _pendingActions[_pendingCount++] = ACTION_RESET;
+                } else if (btn->pin == BTN_PLAY) {
+                    _pendingActions[_pendingCount++] = ACTION_CLEAN;
                 }
             }
         }

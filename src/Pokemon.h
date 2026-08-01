@@ -16,13 +16,21 @@ public:
     void feed();
     void play();
     void warm();
+    void clean();
 
     // Demo: força um estágio com stats cheios
     void forceStage(PokemonStage stage);
 
+    // [TESTE] Decai um stat por vez (energia->sono->higiene->coco) para
+    // verificar o refresh parcial das barras. Sem risco de morte/evolucao.
+    void testCycleBars();
+
     // Updates
     void update(unsigned long deltaMs);
     bool checkEvolution();
+
+    // Recupera energia/sono enquanto o ESP32 esta em modo dormir
+    void sleepRecovery(unsigned long deltaMs);
 
     // Aplica os minutos decorridos enquanto o ESP32 estava desligado
     void catchUpFrom(time_t now);
@@ -37,6 +45,10 @@ public:
     int getHappiness() const { return _happiness; }
     int getHealth() const { return _health; }
     int getWarmth() const { return _warmth; }
+    int getEnergy() const { return _energy; }
+    int getSleep() const { return _sleep; }
+    int getHygiene() const { return _hygiene; }
+    int getDirt() const { return _dirt; }
     int getIncubationProgress() const { return _incubationMinutes; }
     int getAge() const { return _ageMinutes; }
     PokemonStage getStage() const { return _stage; }
@@ -70,6 +82,10 @@ private:
     int _happiness;
     int _health;
     int _warmth;
+    int _energy;
+    int _sleep;
+    int _hygiene;
+    int _dirt;
     int _incubationMinutes;
     int _ageMinutes;
     bool _isAlive;

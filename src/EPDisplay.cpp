@@ -9,21 +9,47 @@
 // ============================================================
 // Layout constants (adaptativo ao tamanho do display)
 // ============================================================
-#define BAR_LABEL_X  10
-#define BAR_VALUE_X  70
-#define BAR_W        (DISPLAY_WIDTH - 10 - BAR_VALUE_X)
-#define BAR_H        10
-#define BAR_GAP      18
-#define BAR_BOTTOM_MARGIN 6
+// Barras da tela do pet: linha i (0=baixo, 5=topo).
+// PET_BAR_X multiplo de 8: a janela parcial (byte-alinhada a 8px) cobre
+// exatamente a barra, sem margem sobrando de um lado (evita ghosting).
+#define PET_BAR_LABEL_X 10
+#define PET_BAR_X       72
+#define PET_BAR_W       (DISPLAY_WIDTH - 10 - PET_BAR_X)
+#define PET_BAR_H       9
+#define PET_BAR_GAP     16
+#define PET_BARS_BOTTOM (DISPLAY_HEIGHT - 8)
+
+static int petBarTop(int row) {
+    return PET_BARS_BOTTOM - PET_BAR_H - row * PET_BAR_GAP;
+}
 
 // Base (y do rodapé) do sprite na tela principal: o sprite cresce para cima
 #define SPRITE_BOTTOM 272
+
+// Icone de coco (1bpp, bit=1 = preto)
+#define POOP_ICON_W 12
+#define POOP_ICON_H 9
+static const unsigned char POOP_ICON[] = {
+    0x3C, 0x00,
+    0x7E, 0x00,
+    0xFF, 0x00,
+    0xFF, 0x00,
+    0x7E, 0x00,
+    0x3C, 0x00,
+    0x3C, 0x00,
+    0x3C, 0x00,
+    0x3C, 0x00
+};
 
 EPDisplay::EPDisplay()
     : _epd(nullptr), _graySprite(nullptr), _grayX(0), _grayY(0),
       _grayW(0), _grayH(0), _graySpriteSet(false),
       _clockX(72), _clockY(36), _clockW(96), _clockH(18),
-      _lastClockSec(-1) {}
+      _lastClockSec(-1), _lastPetAge(-1), _lastPetDirt(-1),
+      _lastPetSprite(nullptr) {
+    memset(_lastPetBars, -1, sizeof(_lastPetBars));
+    _lastPetMsg[0] = '\0';
+}
 
 void EPDisplay::begin() {
     initDisplay();
@@ -118,6 +144,78 @@ void EPDisplay::drawProgressBar(int16_t x, int16_t y, int16_t w, int16_t h,
 // ============================================================
 // Tela principal - mostra o Pokémon com mini stats
 // ============================================================
+
+// Mensagem de status do pet (usada no desenho e no snapshot)
+static const char* petStatusMessage(const Pokemon& pet) {
+    if (pet.isEgg()) {
+        if (pet.getWarmth() < 20) {
+            return "Ovo esta frio!";
+        } else if (pet.getWarmth() >= HATCH_WARMTH_MIN) {
+            return "Aquecido! Quase la!";
+        }
+        return "Aque\xE7""a o ovo!";
+    }
+    if (pet.isDead()) {
+        return "SEM VIDA...";
+    }
+    if (pet.isCritical()) {
+        return "PRECISA DE CUIDADOS!";
+    }
+    return "Feliz e saudavel!";
+}
+
+void EPDisplay::drawBarRow(int row, const char* label, int value, int maxVal) {
+    int top = petBarTop(row);
+    _epd->setCursor(PET_BAR_LABEL_X, top + 9);
+    _epd->print(label);
+    drawProgressBar(PET_BAR_X, top, PET_BAR_W, PET_BAR_H,
+                    value, maxVal, GxEPD_BLACK);
+}
+
+void EPDisplay::drawPoops(const Pokemon& pet) {
+    int level = pet.getDirt() / DIRT_LEVEL_STEP;   // 0..4
+    if (level <= 0) return;
+
+    int16_t sw, sh;
+    getSpriteSize(pet, sw, sh);
+    int spriteX = (DISPLAY_WIDTH - sw) / 2;
+
+    for (int k = 0; k < level; k++) {
+        bool left = (k % 2 == 0);
+        int row = k / 2;
+        int x = left ? spriteX - POOP_ICON_W - 6 : spriteX + sw + 6;
+        int y = SPRITE_BOTTOM - POOP_ICON_H - row * (POOP_ICON_H + 2);
+        if (x >= 0 && x + POOP_ICON_W <= DISPLAY_WIDTH) {
+            drawSprite(x, y, POOP_ICON, POOP_ICON_W, POOP_ICON_H, GxEPD_BLACK);
+        }
+    }
+}
+
+// Regioes (esq/dir) dos cocos ao lado do sprite
+void EPDisplay::snapshotPet(const Pokemon& pet) {
+    _lastPetAge = pet.getAge();
+    _lastPetSprite = pet.getCurrentSprite();
+    _lastPetDirt = pet.getDirt() / DIRT_LEVEL_STEP;
+    strncpy(_lastPetMsg, petStatusMessage(pet), sizeof(_lastPetMsg) - 1);
+    _lastPetMsg[sizeof(_lastPetMsg) - 1] = '\0';
+
+    if (pet.isEgg()) {
+        _lastPetBars[0] = pet.getWarmth();
+        _lastPetBars[1] = pet.getIncubationProgress();
+        _lastPetBars[2] = -1;
+        _lastPetBars[3] = -1;
+        _lastPetBars[4] = -1;
+        _lastPetBars[5] = -1;
+    } else {
+        _lastPetBars[0] = pet.getHappiness();
+        _lastPetBars[1] = pet.getHunger();
+        _lastPetBars[2] = pet.getEnergy();
+        _lastPetBars[3] = pet.getHealth();
+        _lastPetBars[4] = pet.getSleep();
+        _lastPetBars[5] = pet.getHygiene();
+    }
+}
+
 void EPDisplay::drawPet(const Pokemon& pet) {
     _epd->setFullWindow();
     _epd->fillScreen(GxEPD_WHITE);
@@ -127,9 +225,9 @@ void EPDisplay::drawPet(const Pokemon& pet) {
     _epd->setCursor(10, 18);
     _epd->print(pet.getStageName());
 
-    // Idade
+    // Idade (abaixo do nome, sem sobrepor nos nomes longos)
     _epd->setFont(&FreeMonoBold9pt8b);
-    _epd->setCursor(DISPLAY_WIDTH - 70, 18);
+    _epd->setCursor(10, 34);
     _epd->printf("%d min", pet.getAge());
 
     // Sprite ancorado pela BASE (cresce para cima, usando o espaco do topo).
@@ -150,25 +248,14 @@ void EPDisplay::drawPet(const Pokemon& pet) {
     drawSprite(spriteX, spriteY, pet.getCurrentSprite(), sw, sh, GxEPD_BLACK);
 #endif
 
-    _epd->setFont(&FreeMonoBold9pt8b);
+    // Cocos no chao ao lado do sprite
+    if (!pet.isEgg() && !pet.isDead()) {
+        drawPoops(pet);
+    }
 
     // Mensagem em posicao fixa (logo abaixo da base do sprite grande)
-    const char* msg;
-    if (pet.isEgg()) {
-        if (pet.getWarmth() < 20) {
-            msg = "Ovo esta frio!";
-        } else if (pet.getWarmth() >= HATCH_WARMTH_MIN) {
-            msg = "Aquecido! Quase la!";
-        } else {
-            msg = "Aque\xE7""a o ovo!";
-        }
-    } else if (pet.isDead()) {
-        msg = "SEM VIDA...";
-    } else if (pet.isCritical()) {
-        msg = "PRECISA DE CUIDADOS!";
-    } else {
-        msg = "Feliz e saudavel!";
-    }
+    _epd->setFont(&FreeMonoBold9pt8b);
+    const char* msg = petStatusMessage(pet);
     int16_t tx0, ty0;
     uint16_t tw, th;
     _epd->getTextBounds(msg, 0, 0, &tx0, &ty0, &tw, &th);
@@ -176,40 +263,148 @@ void EPDisplay::drawPet(const Pokemon& pet) {
     _epd->print(msg);
 
     // Barras ancoradas no extremo inferior.
-    // Cada linha: label em BAR_LABEL_X, barra em BAR_VALUE_X.
-    // Label termina em x=65 (5 chars * 11px), barra comeca em x=70.
-    int barY = DISPLAY_HEIGHT - BAR_BOTTOM_MARGIN - BAR_H;
-
+    // Linha i: label em PET_BAR_LABEL_X, barra em PET_BAR_X.
     if (pet.isEgg()) {
         // === MODO OVO: Calor + progresso de incubação ===
-        _epd->setCursor(BAR_LABEL_X, barY - BAR_GAP - 2);
-        _epd->print("Calor");
-        drawProgressBar(BAR_VALUE_X, barY - BAR_GAP - 12, BAR_W, BAR_H,
-                        pet.getWarmth(), STATS_MAX, GxEPD_BLACK);
-
-        _epd->setCursor(BAR_LABEL_X, barY - 2);
-        _epd->print("Choco");
-        drawProgressBar(BAR_VALUE_X, barY - 12, BAR_W, BAR_H,
-                        pet.getIncubationProgress(), HATCH_TIME_MINUTES, GxEPD_BLACK);
+        drawBarRow(1, "Calor", pet.getWarmth(), STATS_MAX);
+        drawBarRow(0, "Choco", pet.getIncubationProgress(), HATCH_TIME_MINUTES);
     } else {
         // === MODO POKEMON NORMAL ===
-        _epd->setCursor(BAR_LABEL_X, barY - 2 * BAR_GAP - 2);
-        _epd->print("Fome");
-        drawProgressBar(BAR_VALUE_X, barY - 2 * BAR_GAP - 12, BAR_W, BAR_H,
-                        pet.getHunger(), STATS_MAX, GxEPD_BLACK);
-
-        _epd->setCursor(BAR_LABEL_X, barY - BAR_GAP - 2);
-        _epd->print("Fel");
-        drawProgressBar(BAR_VALUE_X, barY - BAR_GAP - 12, BAR_W, BAR_H,
-                        pet.getHappiness(), STATS_MAX, GxEPD_BLACK);
-
-        _epd->setCursor(BAR_LABEL_X, barY - 2);
-        _epd->print("Sau");
-        drawProgressBar(BAR_VALUE_X, barY - 12, BAR_W, BAR_H,
-                        pet.getHealth(), STATS_MAX, GxEPD_BLACK);
+        drawBarRow(5, "Fel.", pet.getHappiness(), STATS_MAX);
+        drawBarRow(4, "Fome", pet.getHunger(), STATS_MAX);
+        drawBarRow(3, "Ener.", pet.getEnergy(), STATS_MAX);
+        drawBarRow(2, "Sau.", pet.getHealth(), STATS_MAX);
+        drawBarRow(1, "Sono", pet.getSleep(), STATS_MAX);
+        drawBarRow(0, "Hig.", pet.getHygiene(), STATS_MAX);
     }
 
+    snapshotPet(pet);
+
     refresh(); // full refresh
+}
+
+// ============================================================
+// Atualizacao parcial da tela do pet (barras, cocos e idade)
+// ============================================================
+void EPDisplay::pushPartialRegion(int16_t x, int16_t y, int16_t w, int16_t h) {
+#if GRAY_MODE
+    _gray.clearRegion(x, y, w, h);
+    _gray.overlay1bppRect(_epd->uiBuffer(), x, y, w, h);
+    _gray.pushWindow(x, y, w, h);
+#else
+    _epd->displayWindow(x, y, w, h);
+#endif
+}
+
+void EPDisplay::updateBarPartial(int row, const char* label, int value, int maxVal) {
+    (void)label; // o label nao muda, nao precisa redesenhar
+    int top = petBarTop(row);
+
+    // Reescreve o interior inteiro (preenchimento todo) de uma vez: atualizar
+    // so o pedacinho que mudou deixa residuos (ghosting) no e-paper.
+    // A borda (1px nas extremidades) nunca e tocada - nao pisca.
+    int newFillW = map(constrain(value, 0, maxVal), 0, maxVal, 0, PET_BAR_W - 2);
+
+    _epd->fillRect(PET_BAR_X + 1, top + 1, PET_BAR_W - 2, PET_BAR_H - 2, GxEPD_WHITE);
+    if (newFillW > 0) {
+        _epd->fillRect(PET_BAR_X + 1, top + 1, newFillW, PET_BAR_H - 2, GxEPD_BLACK);
+    }
+
+    pushPartialRegion(PET_BAR_X + 1, top + 1, PET_BAR_W - 2, PET_BAR_H - 2);
+    _lastPetBars[row] = value;
+}
+
+void EPDisplay::updateAgePartial(const Pokemon& pet) {
+    // Regiao da idade (abaixo do nome)
+    _epd->fillRect(6, 24, 120, 16, GxEPD_WHITE);
+    _epd->setFont(&FreeMonoBold9pt8b);
+    _epd->setCursor(10, 34);
+    _epd->printf("%d min", pet.getAge());
+
+    pushPartialRegion(6, 24, 120, 16);
+    _lastPetAge = pet.getAge();
+}
+
+void EPDisplay::updatePoopsPartial(const Pokemon& pet) {
+    int16_t sw, sh;
+    getSpriteSize(pet, sw, sh);
+    int spriteX = (DISPLAY_WIDTH - sw) / 2;
+
+    // Regioes esq/dir (duas linhas de coco possiveis)
+    int leftX = spriteX - POOP_ICON_W - 8;
+    int rightX = spriteX + sw + 4;
+    int regY = SPRITE_BOTTOM - POOP_ICON_H - (POOP_ICON_H + 2) - 2;
+    int regH = (POOP_ICON_H + 2) * 2 + 4;
+    int regW = POOP_ICON_W + 4;
+
+    // Apaga as regioes no buffer 1bpp
+    if (leftX >= 0) {
+        _epd->fillRect(leftX, regY, regW, regH, GxEPD_WHITE);
+    }
+    if (rightX + regW <= DISPLAY_WIDTH) {
+        _epd->fillRect(rightX, regY, regW, regH, GxEPD_WHITE);
+    }
+
+    // Redesenha os cocos atuais
+    drawPoops(pet);
+
+    // Push parcial de cada regiao
+    if (leftX >= 0) {
+        pushPartialRegion(leftX, regY, regW, regH);
+    }
+    if (rightX + regW <= DISPLAY_WIDTH) {
+        pushPartialRegion(rightX, regY, regW, regH);
+    }
+    _lastPetDirt = pet.getDirt() / DIRT_LEVEL_STEP;
+}
+
+void EPDisplay::drawPetUpdates(const Pokemon& pet) {
+    // Sprite (humor) ou mensagem mudou? -> redesenho completo
+    if (pet.getCurrentSprite() != _lastPetSprite ||
+        strcmp(petStatusMessage(pet), _lastPetMsg) != 0) {
+        drawPet(pet);
+        return;
+    }
+
+    // Idade
+    if (pet.getAge() != _lastPetAge) {
+        updateAgePartial(pet);
+    }
+
+    // Barras
+    if (pet.isEgg()) {
+        if (pet.getWarmth() != _lastPetBars[0]) {
+            updateBarPartial(1, "Calor", pet.getWarmth(), STATS_MAX);
+        }
+        if (pet.getIncubationProgress() != _lastPetBars[1]) {
+            updateBarPartial(0, "Choco", pet.getIncubationProgress(), HATCH_TIME_MINUTES);
+        }
+    } else {
+        if (pet.getHappiness() != _lastPetBars[0]) {
+            updateBarPartial(5, "Fel.", pet.getHappiness(), STATS_MAX);
+        }
+        if (pet.getHunger() != _lastPetBars[1]) {
+            updateBarPartial(4, "Fome", pet.getHunger(), STATS_MAX);
+        }
+        if (pet.getEnergy() != _lastPetBars[2]) {
+            updateBarPartial(3, "Ener.", pet.getEnergy(), STATS_MAX);
+        }
+        if (pet.getHealth() != _lastPetBars[3]) {
+            updateBarPartial(2, "Sau.", pet.getHealth(), STATS_MAX);
+        }
+        if (pet.getSleep() != _lastPetBars[4]) {
+            updateBarPartial(1, "Sono", pet.getSleep(), STATS_MAX);
+        }
+        if (pet.getHygiene() != _lastPetBars[5]) {
+            updateBarPartial(0, "Hig.", pet.getHygiene(), STATS_MAX);
+        }
+    }
+
+    // Cocos
+    if (!pet.isEgg() && !pet.isDead() &&
+        pet.getDirt() / DIRT_LEVEL_STEP != _lastPetDirt) {
+        updatePoopsPartial(pet);
+    }
 }
 
 // ============================================================
@@ -367,13 +562,7 @@ void EPDisplay::drawClockTick(time_t now) {
     _epd->setCursor(centerX(8 * 11), 48);
     _epd->print(clock);
 
-#if GRAY_MODE
-    _gray.clearRegion(_clockX, _clockY, _clockW, _clockH);
-    _gray.overlay1bppRect(_epd->uiBuffer(), _clockX, _clockY, _clockW, _clockH);
-    _gray.pushWindow(_clockX, _clockY, _clockW, _clockH);
-#else
-    _epd->displayWindow(_clockX, _clockY, _clockW, _clockH);
-#endif
+    pushPartialRegion(_clockX, _clockY, _clockW, _clockH);
 #endif
 }
 

@@ -36,6 +36,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .btn:active { filter: brightness(0.85); transform: scale(0.97); }
   .btn-feed  { background: #e08c3a; }
   .btn-play  { background: #3a9ee0; }
+  .btn-clean { background: #27ae60; }
   .btn-stat  { background: #6c5ce7; }
   .btn-reset { background: #d63031; }
 </style>
@@ -45,6 +46,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <div class="status-box" id="status">Conectado</div>
 <button class="btn btn-feed"  onclick="press('feed')">ALIMENTAR</button>
 <button class="btn btn-play"  onclick="press('play')">BRINCAR</button>
+<button class="btn btn-clean" onclick="press('clean')">LIMPAR</button>
 <button class="btn btn-stat"  onclick="press('status')">STATUS</button>
 <button class="btn btn-reset" onclick="press('reset')">RESETAR</button>
 <script>
@@ -75,6 +77,8 @@ void handleAction() {
         pendingAction = ACTION_FEED;
     } else if (cmd == "play") {
         pendingAction = ACTION_PLAY;
+    } else if (cmd == "clean") {
+        pendingAction = ACTION_CLEAN;
     } else if (cmd == "status") {
         pendingAction = ACTION_STATUS;
     } else if (cmd == "reset") {
@@ -128,6 +132,10 @@ static uint32_t statsFingerprint() {
     h = (h ^ (uint32_t)pet.getHunger()) * 16777619u;
     h = (h ^ (uint32_t)pet.getHappiness()) * 16777619u;
     h = (h ^ (uint32_t)pet.getHealth()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getEnergy()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getSleep()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getHygiene()) * 16777619u;
+    h = (h ^ (uint32_t)pet.getDirt()) * 16777619u;
     h = (h ^ (uint32_t)pet.getLostCount()) * 16777619u;
     h = (h ^ (uint32_t)pet.getWinCount()) * 16777619u;
     h = (h ^ (uint32_t)pet.getShortestLife()) * 16777619u;
@@ -279,6 +287,17 @@ void loop() {
         display.drawClockTick(epochNow());
     }
 
+    // Tela do pet: barras/cocos/idade com refresh parcial
+    if (gameState == STATE_IDLE) {
+        // [TESTE] Barras decaindo uma por vez (Ener->Sono->Hig->Coco)
+        static unsigned long lastBarTest = 0;
+        if (demoScreen == 0 && now - lastBarTest >= 1000) {
+            lastBarTest = now;
+            pet.testCycleBars();
+        }
+        display.drawPetUpdates(pet);
+    }
+
     delay(10);
     return;
 #endif
@@ -304,6 +323,14 @@ void loop() {
                 if (!pet.isDead()) {
                     pet.play();
                     Serial.println(pet.isEgg() ? "Ajudou o ovo!" : "Brincou com o Pokemon!");
+                    gameState = STATE_IDLE;
+                }
+                break;
+
+            case ACTION_CLEAN:
+                if (!pet.isDead() && !pet.isEgg()) {
+                    pet.clean();
+                    Serial.println("Limpou o coco!");
                     gameState = STATE_IDLE;
                 }
                 break;
@@ -337,6 +364,11 @@ void loop() {
     // ========================================
     if (!pet.isDead() && (now - lastStatsUpdate >= STATS_UPDATE_MS)) {
         lastStatsUpdate = now;
+
+        // Dormindo: recupera energia/sono (alem do decay normal)
+        if (gameState == STATE_SLEEPING) {
+            pet.sleepRecovery(delta);
+        }
 
         // Acumula delta e atualiza
         accumulatedDelta += STATS_UPDATE_MS;
@@ -376,7 +408,9 @@ void loop() {
             lastStatsFp = fp;
             needRedraw = true;
         }
-    } else if (now - lastDisplayUpdate >= DISPLAY_REFRESH_MS) {
+    } else if (gameState != STATE_IDLE &&
+               now - lastDisplayUpdate >= DISPLAY_REFRESH_MS) {
+        // Idle usa atualizacao parcial (drawPetUpdates), sem timer
         needRedraw = true;
     }
 
@@ -402,6 +436,11 @@ void loop() {
             default:
                 break;
         }
+    }
+
+    // Tela do pet: barras/cocos/idade com refresh parcial
+    if (gameState == STATE_IDLE) {
+        display.drawPetUpdates(pet);
     }
 
     // Relogio: segundos passam com refresh parcial (sem rebuild da tela)

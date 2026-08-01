@@ -9,6 +9,7 @@ enum ButtonAction {
     ACTION_FEED,      // Botão 1 - Alimentar
     ACTION_PLAY,      // Botão 2 - Brincar
     ACTION_STATUS,    // Botão 3 - Status (toggle)
+    ACTION_CLEAN,     // Pressão longa Botão 2 - Limpar
     ACTION_RESET      // Pressão longa Botão 3 - Reset
 };
 
