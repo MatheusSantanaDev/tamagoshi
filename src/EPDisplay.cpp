@@ -9,6 +9,8 @@
 // ============================================================
 // Layout constants (adaptativo ao tamanho do display)
 // ============================================================
+static void formatAge(char* buf, size_t n, int minutes);  // definida abaixo
+
 // Barras da tela do pet: linha i (0=baixo, 5=topo).
 // PET_BAR_X multiplo de 8: a janela parcial (byte-alinhada a 8px) cobre
 // exatamente a barra, sem margem sobrando de um lado (evita ghosting).
@@ -148,9 +150,9 @@ void EPDisplay::drawProgressBar(int16_t x, int16_t y, int16_t w, int16_t h,
 // Mensagem de status do pet (usada no desenho e no snapshot)
 static const char* petStatusMessage(const Pokemon& pet) {
     if (pet.isEgg()) {
-        if (pet.getWarmth() < 20) {
+        if (pet.getWarmth() < WARMTH_SLOW_MIN) {
             return "Ovo esta frio!";
-        } else if (pet.getWarmth() >= HATCH_WARMTH_MIN) {
+        } else if (pet.getWarmth() >= WARMTH_FAST_MIN) {
             return "Aquecido! Quase la!";
         }
         return "Aque\xE7""a o ovo!";
@@ -201,7 +203,7 @@ void EPDisplay::snapshotPet(const Pokemon& pet) {
 
     if (pet.isEgg()) {
         _lastPetBars[0] = pet.getWarmth();
-        _lastPetBars[1] = pet.getIncubationProgress();
+        _lastPetBars[1] = -1;
         _lastPetBars[2] = -1;
         _lastPetBars[3] = -1;
         _lastPetBars[4] = -1;
@@ -225,10 +227,10 @@ void EPDisplay::drawPet(const Pokemon& pet) {
     _epd->setCursor(10, 18);
     _epd->print(pet.getStageName());
 
-    // Idade (abaixo do nome, sem sobrepor nos nomes longos)
+    // Nivel (lvl = idade em minutos inteiros, atualiza 1x/min)
     _epd->setFont(&FreeMonoBold9pt8b);
     _epd->setCursor(10, 34);
-    _epd->printf("%d min", pet.getAge());
+    _epd->printf("lvl %d", pet.getAge());
 
     // Sprite ancorado pela BASE (cresce para cima, usando o espaco do topo).
     // Base fixa em SPRITE_BOTTOM; o topo sobe conforme o tamanho do estagio.
@@ -265,9 +267,8 @@ void EPDisplay::drawPet(const Pokemon& pet) {
     // Barras ancoradas no extremo inferior.
     // Linha i: label em PET_BAR_LABEL_X, barra em PET_BAR_X.
     if (pet.isEgg()) {
-        // === MODO OVO: Calor + progresso de incubação ===
-        drawBarRow(1, "Calor", pet.getWarmth(), STATS_MAX);
-        drawBarRow(0, "Choco", pet.getIncubationProgress(), HATCH_TIME_MINUTES);
+        // === MODO OVO: apenas Calor (incubacao e interna) ===
+        drawBarRow(0, "Calor", pet.getWarmth(), STATS_MAX);
     } else {
         // === MODO POKEMON NORMAL ===
         drawBarRow(5, "Fel.", pet.getHappiness(), STATS_MAX);
@@ -315,11 +316,11 @@ void EPDisplay::updateBarPartial(int row, const char* label, int value, int maxV
 }
 
 void EPDisplay::updateAgePartial(const Pokemon& pet) {
-    // Regiao da idade (abaixo do nome)
+    // Regiao do lvl (abaixo do nome) - atualiza so este campo
     _epd->fillRect(6, 24, 120, 16, GxEPD_WHITE);
     _epd->setFont(&FreeMonoBold9pt8b);
     _epd->setCursor(10, 34);
-    _epd->printf("%d min", pet.getAge());
+    _epd->printf("lvl %d", pet.getAge());
 
     pushPartialRegion(6, 24, 120, 16);
     _lastPetAge = pet.getAge();
@@ -374,10 +375,7 @@ void EPDisplay::drawPetUpdates(const Pokemon& pet) {
     // Barras
     if (pet.isEgg()) {
         if (pet.getWarmth() != _lastPetBars[0]) {
-            updateBarPartial(1, "Calor", pet.getWarmth(), STATS_MAX);
-        }
-        if (pet.getIncubationProgress() != _lastPetBars[1]) {
-            updateBarPartial(0, "Choco", pet.getIncubationProgress(), HATCH_TIME_MINUTES);
+            updateBarPartial(0, "Calor", pet.getWarmth(), STATS_MAX);
         }
     } else {
         if (pet.getHappiness() != _lastPetBars[0]) {
@@ -411,12 +409,14 @@ void EPDisplay::drawPetUpdates(const Pokemon& pet) {
 // Tela de status detalhado
 // ============================================================
 
-// Formata idade em minutos: "12min" ou "2h30min"
+// Formata idade em minutos: "5min", "2h30min" ou "1d2h"
 static void formatAge(char* buf, size_t n, int minutes) {
     if (minutes < 60) {
         snprintf(buf, n, "%dmin", minutes);
-    } else {
+    } else if (minutes < 24 * 60) {
         snprintf(buf, n, "%dh%02dmin", minutes / 60, minutes % 60);
+    } else {
+        snprintf(buf, n, "%dd%dh", minutes / (24 * 60), (minutes % (24 * 60)) / 60);
     }
 }
 
@@ -477,30 +477,18 @@ void EPDisplay::drawStats(const Pokemon& pet, time_t now) {
     y += lineH;
 
     if (pet.isEgg()) {
-        // Ovo: progresso em texto (sem barras)
+        // Ovo: calor em texto (sem barras)
         _epd->setCursor(labelX, y);
         _epd->print("Calor:");
         _epd->setCursor(valueX, y);
         _epd->printf("%d/%d", pet.getWarmth(), STATS_MAX);
         y += lineH;
-
-        _epd->setCursor(labelX, y);
-        _epd->print("Choco:");
-        _epd->setCursor(valueX, y);
-        _epd->printf("%d/%d min", pet.getIncubationProgress(), HATCH_TIME_MINUTES);
-        y += lineH;
     } else {
-        // Humor e estado
+        // Humor (as barras da tela do pet ja mostram os stats)
         _epd->setCursor(labelX, y);
         _epd->print("Humor:");
         _epd->setCursor(valueX, y);
         _epd->print(pet.getMood());
-        y += lineH;
-
-        _epd->setCursor(labelX, y);
-        _epd->print("Estado:");
-        _epd->setCursor(valueX, y);
-        _epd->print(pet.getState());
         y += lineH;
     }
 

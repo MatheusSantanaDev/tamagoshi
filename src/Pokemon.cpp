@@ -10,8 +10,10 @@ Pokemon::Pokemon()
     : _stage(STAGE_EGG), _hunger(80), _happiness(70),
       _health(100), _warmth(50), _energy(100), _sleep(100),
       _hygiene(100), _dirt(0), _incubationMinutes(0),
-      _ageMinutes(0), _isAlive(true), _minutesAtCurrentStage(0),
-      _lastTickEpoch(0), _lostCount(0), _winCount(0),
+      _incubationFraction(0.0f), _ageMinutes(0), _isAlive(true), _minutesAtCurrentStage(0),
+      _lastTickEpoch(0), _personality(P_GULOSO), _criticalMinutes(0),
+      _megaLifeMinutes(0), _megaContinuousMinutes(0),
+      _lostCount(0), _winCount(0),
       _shortestLife(0), _longestLife(0) {}
 
 void Pokemon::begin(time_t now) {
@@ -27,6 +29,7 @@ void Pokemon::resetEgg() {
     _stage = STAGE_EGG;
     _warmth = 50;
     _incubationMinutes = 0;
+    _incubationFraction = 0.0f;
     _hunger = 80;
     _happiness = 70;
     _health = 100;
@@ -38,6 +41,10 @@ void Pokemon::resetEgg() {
     _isAlive = true;
     _minutesAtCurrentStage = 0;
     _lastTickEpoch = 0;
+    _personality = P_GULOSO;   // Sorteada de novo na chocagem
+    _criticalMinutes = 0;
+    _megaLifeMinutes = 0;
+    _megaContinuousMinutes = 0;
     save();
 }
 
@@ -57,6 +64,11 @@ void Pokemon::feed() {
 
     // Comer gera coco
     _dirt = min(_dirt + DIRT_PER_FEED, STATS_MAX);
+
+    // Comer tambem alegra (Guloso fica muito feliz)
+    _happiness = min(_happiness +
+                     (FEED_HAPPY_BASE * PERSONALITIES[_personality].feedHappyMult) / 100,
+                     STATS_MAX);
 }
 
 void Pokemon::play() {
@@ -68,13 +80,16 @@ void Pokemon::play() {
         return;
     }
 
-    _happiness = min(_happiness + PLAY_AMOUNT, STATS_MAX);
+    _happiness = min(_happiness +
+                     (PLAY_AMOUNT * PERSONALITIES[_personality].playHappyMult) / 100,
+                     STATS_MAX);
     if (_health < 50) {
         _health = min(_health + 2, STATS_MAX);
     }
 
-    // Brincar gasta energia
-    _energy = max(_energy - PLAY_ENERGY_COST, STATS_MIN);
+    // Brincar gasta energia (personalidade influencia o esforco)
+    _energy = max(_energy - (PLAY_ENERGY_COST * PERSONALITIES[_personality].playEnergyMult) / 100,
+                  STATS_MIN);
 }
 
 void Pokemon::clean() {
@@ -100,9 +115,13 @@ void Pokemon::forceStage(PokemonStage stage) {
     _hygiene = 100;
     _dirt = 0;
     _incubationMinutes = 0;
+    _incubationFraction = 0.0f;
     _ageMinutes = 0;
     _minutesAtCurrentStage = 0;
     _lastTickEpoch = 0;
+    _criticalMinutes = 0;
+    _megaLifeMinutes = 0;
+    _megaContinuousMinutes = 0;
 }
 
 // [TESTE] Decai um stat por vez, reciclando ao zerar. So mexe nos 4 stats
@@ -156,9 +175,22 @@ void Pokemon::sleepRecovery(unsigned long deltaMs) {
     const unsigned long ONE_MINUTE = 60000;
     while (accumulated >= ONE_MINUTE) {
         accumulated -= ONE_MINUTE;
-        _energy = min(_energy + SLEEP_RECOVERY_ENERGY, STATS_MAX);
-        _sleep = min(_sleep + SLEEP_RECOVERY_SLEEP, STATS_MAX);
+        const PersonalitySpec& p = PERSONALITIES[_personality];
+        _energy = min(_energy + (SLEEP_RECOVERY_ENERGY * p.sleepRecMult) / 100, STATS_MAX);
+        _sleep = min(_sleep + (SLEEP_RECOVERY_SLEEP * p.sleepRecMult) / 100, STATS_MAX);
     }
+}
+
+// Estagio final da linha (pode evoluir para Mega ou e terminal):
+// tem relogio de vida proprio (FINAL_STAGE_LIFE_MIN)
+static bool isFinalStage(PokemonStage s) {
+    return s == STAGE_SCIZOR || s == STAGE_KLEAVOR || s == STAGE_RAICHU;
+}
+
+// Forma Mega (relogio acumulado de vida proprio)
+static bool isMegaStage(PokemonStage s) {
+    return s == STAGE_MEGASCIZOR || s == STAGE_MEGARAICHUX ||
+           s == STAGE_MEGARAICHUY;
 }
 
 // Um minuto de jogo: idade, decaimento e incubacao
@@ -169,27 +201,34 @@ void Pokemon::tickMinute() {
         // Decaimento do calor
         _warmth = max(_warmth - WARMTH_DECAY, STATS_MIN);
 
-        // Se ovo estiver quente o suficiente, acumula progresso
-        if (_warmth >= HATCH_WARMTH_MIN) {
-            _incubationMinutes++;
-        } else {
-            // Se esfriar, o progresso regride
-            if (_incubationMinutes > 0) {
-                _incubationMinutes--;
+        // Calor so afeta a velocidade da incubacao:
+        //   alto  (>= WARMTH_FAST_MIN) -> normal (+1 min/min)
+        //   baixo (>= WARMTH_SLOW_MIN) -> devagar (+1 min a cada 2 min)
+        //   critico (< WARMTH_SLOW_MIN) -> pausa
+        // Nada regride: o ovo nunca perde progresso.
+        if (_incubationMinutes < HATCH_TIME_MINUTES) {
+            if (_warmth >= WARMTH_FAST_MIN) {
+                _incubationFraction += 1.0f;
+            } else if (_warmth >= WARMTH_SLOW_MIN) {
+                _incubationFraction += 0.5f;
+            }
+            if (_incubationFraction >= 1.0f) {
+                _incubationFraction -= 1.0f;
+                _incubationMinutes++;
             }
         }
     } else {
         // Comportamento normal (fora do ovo)
-        _minutesAtCurrentStage++;
-        _hunger = max(_hunger - HUNGER_DECAY, STATS_MIN);
-        _happiness = max(_happiness - HAPPY_DECAY, STATS_MIN);
-        _energy = max(_energy - ENERGY_DECAY, STATS_MIN);
-        _sleep = max(_sleep - SLEEP_DECAY, STATS_MIN);
-        _hygiene = max(_hygiene - HYGIENE_DECAY, STATS_MIN);
+        const PersonalitySpec& p = PERSONALITIES[_personality];
+        _hunger = max(_hunger - (HUNGER_DECAY * p.hungerMult) / 100, STATS_MIN);
+        _happiness = max(_happiness - (HAPPY_DECAY * p.happyMult) / 100, STATS_MIN);
+        _energy = max(_energy - (ENERGY_DECAY * p.energyMult) / 100, STATS_MIN);
+        _sleep = max(_sleep - (SLEEP_DECAY * p.sleepMult) / 100, STATS_MIN);
+        _hygiene = max(_hygiene - (HYGIENE_DECAY * p.hygieneMult) / 100, STATS_MIN);
         _dirt = min(_dirt + DIRT_ACCUM_PER_MIN, STATS_MAX);
 
         if (_hunger <= 0 || _happiness <= 0) {
-            _health = max(_health - HEALTH_DECAY, STATS_MIN);
+            _health = max(_health - (HEALTH_DECAY * p.healthMult) / 100, STATS_MIN);
         }
 
         // Cansado ou com sono: felicidade cai mais rapido
@@ -199,7 +238,7 @@ void Pokemon::tickMinute() {
 
         // Sujo ou coco acumulado: saude cai
         if (_hygiene <= HYGIENE_CRITICAL || _dirt >= DIRT_CRITICAL) {
-            _health = max(_health - 2, STATS_MIN);
+            _health = max(_health - (2 * p.healthMult) / 100, STATS_MIN);
         }
 
         if (_hunger > 70 && _happiness > 70 && _health < STATS_MAX &&
@@ -207,14 +246,45 @@ void Pokemon::tickMinute() {
             _health = min(_health + 2, STATS_MAX);
         }
 
-        // Velhice: nos estagios finais o Pokemon morre naturalmente
-        bool isFinalStage = (_stage == STAGE_KLEAVOR ||
-                             _stage == STAGE_MEGARAICHUX ||
-                             _stage == STAGE_MEGARAICHUY);
-        if (isFinalStage && _ageMinutes >= MAX_LIFE_MINUTES) {
-            _isAlive = false;
-            recordLife(true);
-        } else if (_health <= 0) {
+        // Periodos criticos: conta minutos em estado critico no estagio
+        // final normal (requisito da Mega). Durante a Mega nao conta -
+        // a transformacao nao e "o estagio".
+        if (!isMegaStage(_stage) &&
+            (_health <= MOOD_HEALTH_LOW || _hunger <= MOOD_HUNGER_LOW ||
+             _happiness <= MOOD_HAPPY_LOW ||
+             _energy <= ENERGY_CRITICAL || _sleep <= SLEEP_CRITICAL ||
+             _hygiene <= HYGIENE_CRITICAL || _dirt >= DIRT_CRITICAL)) {
+            _criticalMinutes++;
+        }
+
+        // ============================================================
+        // RELOGIOS DE VIDA (estagio final normal x Mega)
+        // ============================================================
+        if (isMegaStage(_stage)) {
+            // Transformado: acumula o tempo da Mega (total e consecutivo).
+            // O relogio do estagio final normal fica PAUSADO.
+            _megaContinuousMinutes++;
+            _megaLifeMinutes++;
+        } else {
+            // Normal: o relogio do estagio avanca (inclui o estagio final)
+            _minutesAtCurrentStage++;
+        }
+
+        // Velhice: estagio final normal atinge o limite de vida,
+        // OU a vida acumulada como Mega chega ao total. Ambos = VITORIA.
+        if (isMegaStage(_stage)) {
+            if (_megaLifeMinutes >= MEGA_LIFE_TOTAL_MIN) {
+                _isAlive = false;
+                recordLife(true);
+            }
+        } else if (isFinalStage(_stage)) {
+            if (_minutesAtCurrentStage >= FINAL_STAGE_LIFE_MIN) {
+                _isAlive = false;
+                recordLife(true);
+            }
+        }
+
+        if (_isAlive && _health <= 0) {
             _isAlive = false;
             _health = 0;
             recordLife(false);
@@ -251,62 +321,118 @@ void Pokemon::catchUpFrom(time_t now) {
     save();
 }
 
-bool Pokemon::checkEvolution() {
-    if (!_isAlive) return false;
+EvolutionResult Pokemon::checkEvolution() {
+    if (!_isAlive) return EVO_NONE;
 
     switch (_stage) {
         case STAGE_EGG:
-            if (_incubationMinutes >= HATCH_TIME_MINUTES && _warmth >= HATCH_WARMTH_MIN) {
+            // Choca quando a incubacao completa; calor so define a velocidade
+            if (_incubationMinutes >= HATCH_TIME_MINUTES) {
                 evolve();
-                return true;
+                return EVO_STAGE;
+            }
+            break;
+
+        // Evolucao normal: so o tempo no estagio
+        case STAGE_PICHU:
+            if (_minutesAtCurrentStage >= CLASS_TIMES_MIN[CLASS_BABY]) {
+                evolve();
+                return EVO_STAGE;
             }
             break;
         case STAGE_SCYTHER:
-            if (_ageMinutes >= EVOLVE_SCYTHER_TIME && _happiness >= EVOLVE_MIN_HAPPY) {
-                evolve();
-                return true;
-            }
-            break;
-        case STAGE_SCIZOR:
-            if (_ageMinutes >= EVOLVE_SCIZOR_TIME &&
-                _happiness >= EVOLVE_MIN_HAPPY &&
-                _hunger >= EVOLVE_MIN_FEED) {
-                evolve();
-                return true;
-            }
-            break;
-        case STAGE_KLEAVOR:
-            // Estagio final: nao evolui
-            break;
-        case STAGE_MEGASCIZOR:
-            break;
-        case STAGE_PICHU:
-            if (_ageMinutes >= EVOLVE_PICHU_TIME && _happiness >= EVOLVE_MIN_HAPPY) {
-                evolve();
-                return true;
-            }
-            break;
         case STAGE_PIKACHU:
-            if (_ageMinutes >= EVOLVE_PIKACHU_TIME &&
-                _happiness >= EVOLVE_MIN_HAPPY &&
-                _hunger >= EVOLVE_MIN_FEED) {
+            if (_minutesAtCurrentStage >= CLASS_TIMES_MIN[CLASS_STAGE1]) {
                 evolve();
-                return true;
+                return EVO_STAGE;
             }
             break;
+        // Mega: requisitos no estagio final (tempo + stats + criticos)
+        case STAGE_SCIZOR:
         case STAGE_RAICHU:
-            if (_ageMinutes >= EVOLVE_RAICHU_TIME &&
-                _happiness >= EVOLVE_MIN_HAPPY &&
-                _hunger >= EVOLVE_MIN_FEED) {
-                evolve();
-                return true;
+            if (_minutesAtCurrentStage >= CLASS_TIMES_MIN[CLASS_STAGE2]) {
+                if (megaRequirementsMet()) {
+                    evolveToMega();
+                    return EVO_MEGA;
+                }
             }
             break;
+
+        // Mega e temporaria: maximo de MEGA_MAX_CONTINUOUS_MIN
+        // consecutivos; ao fim, reverte ao estagio final anterior.
+        case STAGE_MEGASCIZOR:
         case STAGE_MEGARAICHUX:
         case STAGE_MEGARAICHUY:
+            if (_megaContinuousMinutes >= MEGA_MAX_CONTINUOUS_MIN) {
+                revertFromMega();
+                return EVO_REVERT;
+            }
             break;
+
+        case STAGE_KLEAVOR:
+            break; // Estagio terminal: nunca evolui, morre de velhice
     }
-    return false;
+    return EVO_NONE;
+}
+
+// Requisitos da Mega: tempo atingido + stats altos + poucos periodos
+// criticos no estagio
+bool Pokemon::megaRequirementsMet() const {
+    if (_happiness < MEGA_REQ_HAPPINESS) return false;
+    if (_health < MEGA_REQ_HEALTH) return false;
+    if (_hygiene < MEGA_REQ_HYGIENE) return false;
+    if (_sleep < MEGA_REQ_SLEEP) return false;
+    if (_criticalMinutes > MEGA_REQ_MAX_CRITICAL_MIN) return false;
+    return true;
+}
+
+// Entrada em Mega: alvo sorteado (Scizor -> Mega Scizor;
+// Raichu -> Mega Raichu X/Y). O relogio do estagio final normal fica
+// PAUSADO (_minutesAtCurrentStage intacto). O relogio acumulado da
+// Mega (_megaLifeMinutes) continua de onde parou; apenas a duracao
+// consecutiva da nova transformacao zera.
+void Pokemon::evolveToMega() {
+    for (size_t r = 0; r < EVOLUTION_RULES_COUNT; r++) {
+        if (EVOLUTION_RULES[r].from != _stage) {
+            continue;
+        }
+        const EvolutionRule& rule = EVOLUTION_RULES[r];
+        int total = 0;
+        for (int i = 0; i < rule.optionCount; i++) {
+            total += rule.options[i].weight;
+        }
+        int roll = (int)(esp_random() % total);
+        int acc = 0;
+        for (int i = 0; i < rule.optionCount; i++) {
+            acc += rule.options[i].weight;
+            if (roll < acc) {
+                _stage = rule.options[i].target;
+                break;
+            }
+        }
+        break;
+    }
+    _megaContinuousMinutes = 0;
+    _criticalMinutes = 0;
+    save();
+    Serial.printf("[EVOLVE] MEGA EVOLUCAO: %s | vida Mega %d min\n",
+                  getStageName(), _megaLifeMinutes);
+}
+
+// Fim da Mega (12h consecutivas): volta ao estagio final anterior.
+// O relogio normal volta a contar de onde estava pausado; o relogio
+// acumulado da Mega fica pausado no ponto em que estava.
+void Pokemon::revertFromMega() {
+    if (_stage == STAGE_MEGASCIZOR) {
+        _stage = STAGE_SCIZOR;
+    } else if (_stage == STAGE_MEGARAICHUX || _stage == STAGE_MEGARAICHUY) {
+        _stage = STAGE_RAICHU;
+    } else {
+        return;
+    }
+    save();
+    Serial.printf("[EVOLVE] Mega acabou - voltou para %s | vida Mega %d min\n",
+                  getStageName(), _megaLifeMinutes);
 }
 
 void Pokemon::evolve() {
@@ -327,6 +453,7 @@ void Pokemon::evolve() {
         }
         _warmth = 0;
         _incubationMinutes = 0;
+        _incubationFraction = 0.0f;
         _hunger = 80;
         _happiness = 70;
         _health = 100;
@@ -334,8 +461,12 @@ void Pokemon::evolve() {
         _sleep = 100;
         _hygiene = 100;
         _dirt = 0;
-        Serial.printf("[EVOLVE] Ovo chocou: %s\n", getStageName());
+        // Personalidade (oculta) sorteada na chocagem
+        _personality = (Personality)(esp_random() % P_COUNT);
+        Serial.printf("[EVOLVE] Ovo chocou: %s (personalidade: %s)\n",
+                      getStageName(), getPersonalityName());
         _minutesAtCurrentStage = 0;
+        _criticalMinutes = 0;
         save();
         return;
     }
@@ -360,6 +491,7 @@ void Pokemon::evolve() {
             }
         }
         _minutesAtCurrentStage = 0;
+        _criticalMinutes = 0;
         save();
         Serial.printf("[EVOLVE] %s\n", getStageName());
         return;
@@ -391,13 +523,13 @@ const unsigned char* Pokemon::getCurrentSprite() const {
     }
 
     if (_stage == STAGE_EGG) {
-        if (_warmth >= HATCH_WARMTH_MIN && _incubationMinutes >= HATCH_TIME_MINUTES) {
+        if (_warmth >= WARMTH_FAST_MIN && _incubationMinutes >= HATCH_TIME_MINUTES) {
             return EGG_HATCHING;
         }
-        if (_warmth >= HATCH_WARMTH_MIN) {
+        if (_warmth >= WARMTH_FAST_MIN) {
             return EGG_WARM;
         }
-        if (_warmth > 20) {
+        if (_warmth >= WARMTH_SLOW_MIN) {
             return EGG_IDLE;
         }
         return EGG_COLD;
@@ -454,13 +586,13 @@ const unsigned char* Pokemon::getCurrentGraySprite() const {
     }
 
     if (_stage == STAGE_EGG) {
-        if (_warmth >= HATCH_WARMTH_MIN && _incubationMinutes >= HATCH_TIME_MINUTES) {
+        if (_warmth >= WARMTH_FAST_MIN && _incubationMinutes >= HATCH_TIME_MINUTES) {
             return EGG_GRAY_HATCHING;
         }
-        if (_warmth >= HATCH_WARMTH_MIN) {
+        if (_warmth >= WARMTH_FAST_MIN) {
             return EGG_GRAY_WARM;
         }
-        if (_warmth > 20) {
+        if (_warmth >= WARMTH_SLOW_MIN) {
             return EGG_GRAY_IDLE;
         }
         return EGG_GRAY_COLD;
@@ -522,39 +654,19 @@ bool Pokemon::isDead() const {
     return !_isAlive;
 }
 
-// Humor: comportamento momentaneo. Felicidade ajustada por saude/fome
-// (um pokemon doente ou faminto fica pior do que a felicidade indica).
+// Humor: sistema priorizado (pior situacao primeiro).
+// Doente > Faminto > Cansado > Irritado > Triste > Feliz > Neutro
 const char* Pokemon::getMood() const {
     if (!_isAlive) return "Sem vida";
     if (_stage == STAGE_EGG) return "Intrigado";
-
-    int score = _happiness;
-    if (_health < 30) score -= 30;
-    if (_hunger < 20) score -= 20;
-    if (_energy < 20) score -= 20;
-    if (_sleep < 20) score -= 20;
-    if (_hygiene < 20) score -= 10;
-    if (_health > 60 && _hunger > 60) score += 10;
-
-    if (score >= 80) return "Euforico";
-    if (score >= 60) return "Animado";
-    if (score >= 40) return "Calmo";
-    if (score >= 20) return "Aborrecido";
-    return "Deprimido";
-}
-
-// Estado: condicao geral, prioridade da pior situacao
-const char* Pokemon::getState() const {
-    if (!_isAlive) return "Morto";
-    if (_stage == STAGE_EGG) return "Incubando";
-    if (_hunger <= 20) return "Faminto";
-    if (_happiness <= 20) return "Irritado";
-    if (_health <= 30) return "Doente";
-    if (_sleep <= SLEEP_CRITICAL || _energy <= ENERGY_CRITICAL) return "Cansado";
-    if (_hygiene <= HYGIENE_CRITICAL || _dirt >= DIRT_CRITICAL) return "Sujo";
-    if (_happiness <= 40) return "Triste";
-    if (_hunger <= 40) return "Com fome";
-    return "Feliz";
+    if (_health <= MOOD_HEALTH_LOW) return "Doente";
+    if (_hunger <= MOOD_HUNGER_LOW) return "Faminto";
+    if (_energy <= MOOD_ENERGY_LOW && _sleep <= MOOD_SLEEP_LOW) return "Cansado";
+    if (_hygiene <= MOOD_HYGIENE_LOW) return "Irritado";
+    if (_happiness <= MOOD_HAPPY_LOW && _hunger <= MOOD_HUNGER_MID) return "Triste";
+    if (_happiness >= MOOD_HAPPY_HIGH && _hunger >= MOOD_HUNGER_OK &&
+        _energy >= MOOD_ENERGY_HIGH) return "Feliz";
+    return "Neutro";
 }
 
 // Registra o fim de uma vida no historico permanente
@@ -605,6 +717,10 @@ void Pokemon::save() {
     nvs_set_i32(handle, "age", _ageMinutes);
     nvs_set_i32(handle, "stageMins", _minutesAtCurrentStage);
     nvs_set_u8(handle, "alive", _isAlive ? 1 : 0);
+    nvs_set_u8(handle, "personality", (uint8_t)_personality);
+    nvs_set_i32(handle, "critMin", _criticalMinutes);
+    nvs_set_i32(handle, "megaLife", _megaLifeMinutes);
+    nvs_set_i32(handle, "megaCont", _megaContinuousMinutes);
 
     // Historico permanente (nao reseta junto com o Pokemon)
     nvs_set_i32(handle, "lost", _lostCount);
@@ -679,6 +795,18 @@ void Pokemon::load() {
     if (nvs_get_u8(handle, "alive", &u8val) == ESP_OK) {
         _isAlive = (u8val == 1);
     }
+    if (nvs_get_u8(handle, "personality", &u8val) == ESP_OK && u8val < P_COUNT) {
+        _personality = (Personality)u8val;
+    }
+    if (nvs_get_i32(handle, "critMin", &i32val) == ESP_OK) {
+        _criticalMinutes = i32val;
+    }
+    if (nvs_get_i32(handle, "megaLife", &i32val) == ESP_OK) {
+        _megaLifeMinutes = i32val;
+    }
+    if (nvs_get_i32(handle, "megaCont", &i32val) == ESP_OK) {
+        _megaContinuousMinutes = i32val;
+    }
     if (nvs_get_i64(handle, "lastTick", &i64val) == ESP_OK) {
         _lastTickEpoch = (time_t)i64val;
     }
@@ -703,7 +831,8 @@ void Pokemon::load() {
     if (_stage != STAGE_EGG) {
         Serial.printf(" Hunger:%d Happy:%d Health:%d", _hunger, _happiness, _health);
     }
-    Serial.printf(" Age:%dmin\n", _ageMinutes);
+    Serial.printf(" Age:%dmin | Personalidade: %s\n",
+                  _ageMinutes, getPersonalityName());
 }
 
 void Pokemon::clearSave() {

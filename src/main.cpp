@@ -251,9 +251,14 @@ void loop() {
     static int demoScreen = 0;
 
     if (action == ACTION_FEED) {
-        demoStage = (demoStage + 1) % (STAGE_MEGARAICHUY + 1);
-        pet.forceStage((PokemonStage)demoStage);
-        Serial.printf("[DEMO] Estagio: %s\n", pet.getStageName());
+        if (pet.isEgg()) {
+            pet.feed();
+            Serial.printf("[DEMO] Aqueceu o ovo! Calor: %d\n", pet.getWarmth());
+        } else {
+            demoStage = (demoStage + 1) % (STAGE_MEGARAICHUY + 1);
+            pet.forceStage((PokemonStage)demoStage);
+            Serial.printf("[DEMO] Estagio: %s\n", pet.getStageName());
+        }
         lastDisplayUpdate = 0;
     } else if (action == ACTION_PLAY) {
         demoScreen = (demoScreen + 1) % 6;
@@ -265,7 +270,7 @@ void loop() {
     } else if (action == ACTION_RESET) {
         demoStage = STAGE_EGG;
         demoScreen = 0;
-        pet.forceStage(STAGE_EGG);
+        pet.resetEgg();
         gameState = STATE_IDLE;
         Serial.println("[DEMO] Resetado para o ovo");
     }
@@ -287,11 +292,25 @@ void loop() {
         display.drawClockTick(epochNow());
     }
 
+    // Ovo no demo: o tempo passa (lvl sobe, calor decai, incubacao avanca)
+    if (pet.isEgg()) {
+        static unsigned long lastEggSim = 0;
+        if (now - lastEggSim >= 2000) {
+            lastEggSim = now;
+            pet.update(30000);  // 1 min de jogo a cada 4s reais
+            EvolutionResult evo = pet.checkEvolution();
+            if (evo != EVO_NONE) {
+                Serial.printf("[DEMO] Chocou! Novo: %s (person: %s)\n",
+                              pet.getStageName(), pet.getPersonalityName());
+            }
+        }
+    }
+
     // Tela do pet: barras/cocos/idade com refresh parcial
     if (gameState == STATE_IDLE) {
         // [TESTE] Barras decaindo uma por vez (Ener->Sono->Hig->Coco)
         static unsigned long lastBarTest = 0;
-        if (demoScreen == 0 && now - lastBarTest >= 1000) {
+        if (!pet.isEgg() && demoScreen == 0 && now - lastBarTest >= 1000) {
             lastBarTest = now;
             pet.testCycleBars();
         }
@@ -375,13 +394,24 @@ void loop() {
         pet.update(STATS_UPDATE_MS);
 
         // Verifica evolução
-        if (pet.checkEvolution()) {
+        EvolutionResult evo = pet.checkEvolution();
+        if (evo != EVO_NONE) {
             gameState = STATE_EVOLVING;
             display.drawEvolution(pet);
             delay(3000); // Mostra por 3 segundos
             gameState = STATE_IDLE;
             lastDisplayUpdate = 0;
-            Serial.printf("Evoluiu para %s!\n", pet.getStageName());
+            switch (evo) {
+                case EVO_MEGA:
+                    Serial.println("MEGA EVOLUCAO!");
+                    break;
+                case EVO_REVERT:
+                    Serial.println("Mega acabou - voltou ao estagio anterior!");
+                    break;
+                default:
+                    Serial.printf("Evoluiu para %s!\n", pet.getStageName());
+                    break;
+            }
         }
 
         // Verifica alertas

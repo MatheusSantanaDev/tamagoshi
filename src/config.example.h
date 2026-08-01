@@ -2,17 +2,6 @@
 #define CONFIG_H
 
 // ============================================================
-// CONFIGURACAO DO PROJETO
-//
-// Copie este arquivo para "config.h" e ajuste os valores para o
-// seu dispositivo:
-//
-//   cp src/config.example.h src/config.h
-//
-// O arquivo config.h NAO e versionado (contem credenciais).
-// ============================================================
-
-// ============================================================
 // DISPLAY CONFIG - WeAct 3.7" E-Paper (240x416, UC8253)
 // ============================================================
 // Pinos SPI (WeAct default: SCLK=18, MOSI=23)
@@ -50,26 +39,164 @@
 #define HAPPY_DECAY       1   // Felicidade cai 1 por minuto
 #define HEALTH_DECAY      5   // Saúde cai 5 por minuto (quando critico)
 
+// Novos stats (0-100)
+#define ENERGY_DECAY      1   // Energia cai 1/min (sobe dormindo)
+#define SLEEP_DECAY       1   // Sono cai 1/min (sobe dormindo)
+#define HYGIENE_DECAY     1   // Higiene cai 1/min
+#define DIRT_ACCUM_PER_MIN 1  // Coco acumula 1/min (e mais ao alimentar)
+
+// Custo/efeitos das acoes
+#define PLAY_ENERGY_COST  10  // Brincar gasta energia
+#define DIRT_PER_FEED     15  // Cada alimentacao gera coco
+
+// Recuperacao dormindo (por minuto)
+#define SLEEP_RECOVERY_ENERGY 15
+#define SLEEP_RECOVERY_SLEEP  20
+
+// Limiares criticos
+#define ENERGY_CRITICAL   15  // Abaixo disso, felicidade cai mais rapido
+#define SLEEP_CRITICAL    15  // Abaixo disso, felicidade cai mais rapido
+#define HYGIENE_CRITICAL  15  // Abaixo disso, saude cai
+#define DIRT_CRITICAL     60  // Acima disso, saude cai
+
+// Cocos na tela do pet: nivel = sujeira / DIRT_LEVEL_STEP (0..4)
+#define DIRT_LEVEL_STEP   25
+
+// ============================================================
+// CLASSES E TEMPOS DE EVOLUCAO (minutos)
+// ============================================================
+// Linhas com baby:  Egg -> Baby -> Stage 1 -> Stage 2
+// Linhas sem baby:  Egg -> Stage 1 -> Stage 2 -> Stage 3
+// A evolucao normal ocorre ao permanecer o tempo da classe no estagio.
+enum PokemonClass {
+    CLASS_EGG = 0,
+    CLASS_BABY,
+    CLASS_STAGE1,
+    CLASS_STAGE2,
+    CLASS_STAGE3
+};
+
+static const int CLASS_TIMES_MIN[] = {
+    5,        // CLASS_EGG:    choca em 5 min
+    4 * 60,   // CLASS_BABY:   4 h
+    24 * 60,  // CLASS_STAGE1: 24 h
+    36 * 60,  // CLASS_STAGE2: 36 h
+    48 * 60,  // CLASS_STAGE3: 48 h
+};
+
+// ============================================================
+// MEGA EVOLUTION - requisitos para evoluir do estagio final
+// ============================================================
+#define MEGA_REQ_HAPPINESS 85
+#define MEGA_REQ_HEALTH    85
+#define MEGA_REQ_HYGIENE   80
+#define MEGA_REQ_SLEEP     70
+// "Poucos periodos criticos": maximo de minutos em estado critico
+// acumulados no estagio (reseta a cada entrada em Mega)
+#define MEGA_REQ_MAX_CRITICAL_MIN 90
+
+// ============================================================
+// RELOGIOS DE VIDA - o estagio final normal e a Mega possuem
+// relogios de vida INDEPENDENTES:
+// - Estagio final normal (ex.: Raichu): vida de FINAL_STAGE_LIFE_MIN.
+//   PAUSA enquanto o Pokemon esta em Mega; volta a contar ao
+//   destransformar. Atingir o limite = morte por velhice.
+// - Mega: vida total acumulada de MEGA_LIFE_TOTAL_MIN, contando APENAS
+//   o tempo transformado (pausa fora da Mega, nao reinicia). Atingir
+//   o limite = morte por velhice como Mega.
+// - Cada transformacao Mega dura no maximo MEGA_MAX_CONTINUOUS_MIN
+//   consecutivos; ao fim, reverte ao estagio final e pode entrar
+//   de novo (o acumulado da Mega continua de onde parou).
+// Morre o que acontecer primeiro entre os dois relogios.
+// ============================================================
+#define FINAL_STAGE_LIFE_MIN   (48 * 60)   // 48 h
+#define MEGA_LIFE_TOTAL_MIN    (50 * 60)   // 50 h
+#define MEGA_MAX_CONTINUOUS_MIN (12 * 60)  // 12 h
+
+// ============================================================
+// HUMOR (prioridade: Doente > Faminto > Cansado > Irritado >
+// Triste > Feliz > Neutro)
+// ============================================================
+#define MOOD_HEALTH_LOW   20  // Saude baixa     -> Doente
+#define MOOD_HUNGER_LOW   15  // Fome muito alta -> Faminto
+#define MOOD_ENERGY_LOW   20  // Energia baixa + sono baixo -> Cansado
+#define MOOD_SLEEP_LOW    20
+#define MOOD_HYGIENE_LOW  20  // Higiene baixa   -> Irritado
+#define MOOD_HAPPY_LOW    35  // Felicidade baixa + fome alta -> Triste
+#define MOOD_HUNGER_MID   35
+#define MOOD_HAPPY_HIGH   60  // Felicidade alta + fome baixa + energia alta -> Feliz
+#define MOOD_HUNGER_OK    60
+#define MOOD_ENERGY_HIGH  60
+
+// ============================================================
+// PERSONALIDADE - sorteada na chocagem, oculta do jogador.
+// Modifica discretamente os atributos (100 = normal).
+// ============================================================
+enum Personality {
+    P_GULOSO = 0,
+    P_PREGUICOSO,
+    P_BRINCALHAO,
+    P_AGITADO,
+    P_CARINHOSO,
+    P_TEIMOSO,
+    P_DORMINHOCO,
+    P_RESISTENTE,
+    P_FRAGIL,
+    P_COUNT
+};
+
+struct PersonalitySpec {
+    const char* name;
+    int hungerMult;      // Decaimento da fome (%)
+    int happyMult;       // Decaimento da felicidade (%)
+    int energyMult;      // Decaimento da energia (%)
+    int sleepMult;       // Decaimento do sono (%)
+    int hygieneMult;     // Decaimento da higiene (%)
+    int healthMult;      // Decaimento da saude quando critico (%)
+    int feedHappyMult;   // Felicidade ganha ao comer (%)
+    int playHappyMult;   // Felicidade ganha ao brincar (%)
+    int playEnergyMult;  // Energia gasta ao brincar (%)
+    int sleepRecMult;    // Recuperacao dormindo (%)
+};
+
+static const PersonalitySpec PERSONALITIES[P_COUNT] = {
+    // nome         fome fel ener sono higi saude comer brinc custo sono
+    { "Guloso",      115, 100, 100, 100, 100, 100, 150, 100, 100, 100 },
+    { "Preguicoso",  100, 100,  85, 100, 100, 100, 100,  75, 100, 100 },
+    { "Brincalhao",  100, 100, 100, 100, 100, 100, 100, 150, 115, 100 },
+    { "Agitado",     100, 120, 115, 100, 100, 100, 100, 100, 100, 100 },
+    { "Carinhoso",   100,  80, 100, 100, 100,  75, 100, 100, 100, 100 },
+    { "Teimoso",      85, 100, 100, 100, 100, 100, 100,  75, 100, 100 },
+    { "Dorminhoco",  100, 100, 100, 120, 100, 100, 100, 100, 100, 125 },
+    { "Resistente",  100, 100, 100, 100, 100,  75, 100, 100, 100, 100 },
+    { "Fragil",      100, 110, 100, 100, 100, 125, 100, 100, 100, 100 },
+};
+
+// Efeitos das personalidades:
+// - Guloso:      come mais, felicidade sobe mais ao comer
+// - Preguicoso:  energia cai mais devagar, brinca com menos animo
+// - Brincalhao:  felicidade sobe mais ao brincar (gasta mais energia)
+// - Agitado:     entedia mais facil, gasta mais energia
+// - Carinhoso:   felicidade cai devagar, saude resiste mais
+// - Teimoso:     come menos, brinca com menos animo
+// - Dorminhoco:  dorme mais (cai mais rapido e recupera mais)
+// - Resistente:  saude quase nao cai
+// - Fragil:      saude cai mais facil
+
+#define FEED_HAPPY_BASE 10  // Felicidade base ganha ao comer
+
 // ============================================================
 // EGG CONFIG
 // ============================================================
 #define WARMTH_DECAY         3   // Calor do ovo cai 3/min
-#define WARM_AMOUNT         20   // Aquecer recupera 20 de calor
-#define HATCH_WARMTH_MIN    60   // Calor mínimo para chocar
-#define HATCH_TIME_MINUTES   2   // Minutos aquecido necessários
+#define WARM_AMOUNT         20   // Alimentar aquece 20 de calor
+#define HATCH_TIME_MINUTES   5   // Minutos de incubacao para chocar
+#define WARMTH_FAST_MIN     60   // Calor >= 60: incubacao normal (+1/min)
+#define WARMTH_SLOW_MIN     30   // Calor 30..59: incubacao devagar; <30: pausa
 
 // Efeito das ações
 #define FEED_AMOUNT      20   // Alimentar recupera 20 de fome
 #define PLAY_AMOUNT      15   // Brincar recupera 15 de felicidade
-
-// Thresholds de evolução (em minutos)
-#define EVOLVE_SCYTHER_TIME  3   // Scyther -> Scizor/Kleavor após 3 min
-#define EVOLVE_SCIZOR_TIME   8   // Scizor -> Mega Scizor após 8 min
-#define EVOLVE_PICHU_TIME    3   // Pichu -> Pikachu após 3 min
-#define EVOLVE_PIKACHU_TIME  8   // Pikachu -> Raichu após 8 min
-#define EVOLVE_RAICHU_TIME   12  // Raichu -> Mega Raichu após 12 min
-#define EVOLVE_MIN_HAPPY     60  // Felicidade mínima para evoluir
-#define EVOLVE_MIN_FEED      40  // Fome mínima para evoluir
 
 // Intervalos
 #define STATS_UPDATE_MS    1000   // Atualiza stats a cada 1s
@@ -116,12 +243,12 @@ static const char* STAGE_NAMES[] = {
 // ============================================================
 // WIFI - Botoes virtuais via browser (http://<ip-do-esp32>)
 // ============================================================
-#define WIFI_SSID   "seu-wifi"     // <-- configure aqui
-#define WIFI_PASS   "sua-senha"    // <-- configure aqui
+#define WIFI_SSID   "login"
+#define WIFI_PASS   "senha"
 
 // Fallback: hotspot proprio do ESP32 (so 2.4GHz)
 #define AP_SSID     "Tamagoshi"
-#define AP_PASS     "troque-me"    // <-- configure aqui
+#define AP_PASS     "tamagoshi"
 
 // ============================================================
 // RELOGIO - Tempo real via NTP (o jogo evolui mesmo desligado)
@@ -137,6 +264,11 @@ static const char* STAGE_NAMES[] = {
 #define DEFAULT_TIME_HOUR   12
 #define DEFAULT_TIME_MINUTE 0
 #define DEFAULT_TIME_SECOND 0
+
+// Relogio da tela de status: atualiza apenas a regiao dos digitos
+// (refresh parcial) a cada segundo, sem reconstruir a tela inteira.
+// Se o display apresentar artefatos/ghosting, desligue (0).
+#define CLOCK_PARTIAL_UPDATE 1
 
 // ============================================================
 // DISPLAY STATE
