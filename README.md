@@ -19,12 +19,14 @@ cp src/config.example.h src/config.h   # preencha WIFI_SSID/WIFI_PASS
 pio run -t upload                      # compila e envia via USB
 ```
 
-Abra o browser em `http://<ip-do-esp32>` para os botões virtuais.
+Abra o browser em `http://<ip-do-esp32>` para os botões virtuais. A página
+tem também um **Guia de Testes (Dev)** com atalhos para testar sem esperar:
+forçar estágio, sujeira/cocos, ajustar barras e colocar o pet para dormir.
 
 ### Demo mode
 
-Com `DEMO_MODE 1` (padrão), o dispositivo simula o jogo — ótimo para testar
-sem esperar horas:
+Com `DEMO_MODE 1`, o dispositivo simula o jogo — ótimo para testar sem
+esperar horas (o padrão é `DEMO_MODE 0`, tempo real):
 
 - No **ovo**: o tempo passa acelerado (1 min de jogo a cada ~4s) — o `lvl`
   sobe, o calor decai e a incubação avança; **FEED aquece** o ovo. Quando a
@@ -39,8 +41,26 @@ Com `DEMO_MODE 0`, o jogo segue o tempo real:
 - **FEED** alimenta (no ovo, aquece +20 de calor)
 - **PLAY** brinca
 - **STATUS** mostra a tela de stats
+- **Pressão longa PLAY** limpa os cocos | **Pressão longa STATUS** reseta
 - O tempo real vira **lvl** (idade em minutos, atualiza a cada minuto com
   refresh parcial) e faz os stats decaírem; salva automaticamente na NVS.
+
+## Sono
+
+Depois de `SLEEP_AFTER_MS` (60s) sem interação, o pet **adormece**: enquanto
+dorme, recupera `SLEEP_RECOVERY_ENERGY` (15) de energia e
+`SLEEP_RECOVERY_SLEEP` (20) de sono por minuto (multiplicado pela
+personalidade), além do decaimento normal. Qualquer ação (botão ou web)
+acorda.
+
+As telas alternam sem refresh periódico (o e-paper só redesenha na troca):
+
+- `SLEEP_ZZZ_MIN` (2 min) — tela central "Zzzzzz..."
+- `SLEEP_PET_MIN` (1 min) — o pokemon com um "Zzz" sobre a cabeça (legenda
+  branca, posição proporcional ao quadrado da imagem; funciona sobre
+  qualquer sprite, inclusive os escuros)
+
+Se o pet morrer dormindo, a tela de morte é mostrada na próxima troca.
 
 ## Ovo e incubação
 
@@ -131,8 +151,8 @@ Irritado > Triste > Feliz > Neutro), calculado dos stats via limiares
 
 - **Animações de evolução**: transição visual no momento da evolução (atualmente
   troca direta de sprite).
-- **Sono e ciclo dia/noite**: o bichinho dorme e os stats decaem conforme horário
-  real.
+- **Ciclo dia/noite**: stats variando conforme horário real (o sono por
+  inatividade já existe).
 - **Níveis e XP**: interações dão experiência e liberam evoluções alternativas.
 - **Variações de humor**: gerar sprites SAD/HAPPY de verdade, em vez do alias
   para o mesmo sprite.

@@ -44,6 +44,16 @@ BOTTOM_ALIGN = {"pikachu", "raichu", "megaraichux", "megaraichuy"}
 SAUVOLA_R = 15
 SAUVOLA_K = 0.2
 
+# Icones avulsos (nao sao estagios): (base do arquivo em tools/sprites,
+# prefixo C, tamanho, opcoes). Opcoes: thr = limiar global (L < thr vira
+# preto; padrao 127), crop = recorta o conteudo denso (L < 150) antes de
+# redimensionar, para o desenho preencher a moldura. Gera
+# sprites/<base>.h (1bpp) e sprites_gray/<base>.h (2bpp) com os arrays
+# <PREFIXO> e <PREFIXO>_GRAY.
+ICONS = [
+    ("coco", "COCO", (24, 24), {"thr": 170, "crop": True}),
+]
+
 def integral_sum(img):
     """Soma e soma de quadrados via imagem integral."""
     w, h = img.size
@@ -372,6 +382,82 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
             out.append(byte << (8 - 2 * (w % 4)))
     return out
 
+def icon_prepare(img, w, h, crop):
+    """Compoe sobre branco, converte para L e (opcionalmente) recorta o
+    conteudo denso (L < 150) para o desenho preencher a moldura."""
+    img = img.convert("RGBA")
+    bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+    img = Image.alpha_composite(bg, img).convert("L")
+    if crop:
+        px = img.load()
+        cw, ch = img.size
+        xs = [x for x in range(cw) for y in range(ch) if px[x, y] < 150]
+        ys = [y for x in range(cw) for y in range(ch) if px[x, y] < 150]
+        if xs:
+            img = img.crop((min(xs), min(ys), max(xs) + 1, max(ys) + 1))
+    return img.resize((w, h), Image.LANCZOS)
+
+def icon_to_c_array(img, w, h, thr=127, crop=False):
+    """1bpp com limiar global (NAO sauvola). Para designs planos/escuros
+    com fundo transparente (ex.: coco): escuro vira preto, o resto branco.
+    bit=1 = preto, MSB first (padrao XBM). Remove componentes pretos com
+    menos de 3 pixels (sobra de tracos finos apos o redimensionamento)."""
+    img = icon_prepare(img, w, h, crop)
+    bw, bh = img.size
+    px = img.load()
+    byte_width = (w + 7) // 8
+    arr = bytearray(byte_width * h)
+    for y in range(bh):
+        for x in range(bw):
+            if px[x, y] < thr:
+                arr[y * byte_width + x // 8] |= 0x80 >> (x % 8)
+    def is_black(x, y):
+        return 0 <= x < bw and 0 <= y < bh and \
+            (arr[y * byte_width + x // 8] & (0x80 >> (x % 8)))
+    visited = [[False] * bw for _ in range(bh)]
+    out = bytearray(arr)
+    for y in range(bh):
+        for x in range(bw):
+            if not is_black(x, y) or visited[y][x]:
+                continue
+            stack = [(x, y)]
+            visited[y][x] = True
+            comp = []
+            while stack:
+                cx, cy = stack.pop()
+                comp.append((cx, cy))
+                for ny in (cy - 1, cy, cy + 1):
+                    for nx in (cx - 1, cx, cx + 1):
+                        if 0 <= nx < bw and 0 <= ny < bh and \
+                           not visited[ny][nx] and is_black(nx, ny):
+                            visited[ny][nx] = True
+                            stack.append((nx, ny))
+            if len(comp) < 3:
+                for cx, cy in comp:
+                    out[cy * byte_width + cx // 8] &= ~(0x80 >> (cx % 8))
+    return bytes(out)
+
+def icon_to_c_array_2bpp(img, w, h, thr=127, t1=90, crop=False):
+    """2bpp com limiar global: 0b11=branco, 0b10=cinza claro, 0b01=cinza
+    escuro, 0b00=preto. L >= thr -> branco; L < t1 -> preto; meio -> cinza
+    escuro (para icones escuros o corpo vira cinza e o contorno preto)."""
+    img = icon_prepare(img, w, h, crop)
+    bw, bh = img.size
+    px = img.load()
+    byte_width = (w + 3) // 4
+    arr = bytearray(byte_width * h)
+    for y in range(bh):
+        for x in range(bw):
+            L = px[x, y]
+            if L >= thr:
+                v = 0b11
+            elif L < t1:
+                v = 0b00
+            else:
+                v = 0b01
+            arr[y * byte_width + x // 4] |= v << (6 - 2 * (x % 4))
+    return bytes(arr)
+
 def crop_content(img, fill):
     """Recorta as margens vazias da imagem e deixa o conteudo ocupando
     `fill` da moldura (0 < fill <= 1). fill=1.0 nao altera nada."""
@@ -511,6 +597,34 @@ def main():
             for name, _ in arrays[base]:
                 if name != f"{prefix}_IDLE":
                     gray_block += f"\n#define {name.replace(f'{prefix}_', f'{prefix}_GRAY_')} {prefix}_GRAY_IDLE\n"
+        gfname = os.path.join(gray_dir, f"{base}.h")
+        with open(gfname, "w") as f:
+            f.write(gray_block)
+        gray_includes.append(f'#include "sprites_gray/{base}.h"')
+
+    # 3b) Icones avulsos (ex.: coco): 1 array 1bpp + 1 array 2bpp
+    for entry in ICONS:
+        base, prefix, size = entry[0], entry[1], entry[2]
+        opts = entry[3] if len(entry) > 3 else {}
+        thr = opts.get("thr", 127)
+        crop = opts.get("crop", False)
+        path = pngs.get(base)
+        if not path:
+            print(f"[aviso] sem imagem para o icone {base} - ignorado")
+            continue
+        img = Image.open(path)
+        arr = icon_to_c_array(img, *size, thr=thr, crop=crop)
+        block = "// Gerado por tools/rebuild_sprites.py\n"
+        block += f"#define {prefix}_W {size[0]}\n#define {prefix}_H {size[1]}\n\n"
+        block += fmt_array(prefix, arr, *size) + "\n"
+        fname = os.path.join(sprites_dir, f"{base}.h")
+        with open(fname, "w") as f:
+            f.write(block)
+        includes.append(f'#include "sprites/{base}.h"')
+
+        gray_block = "// Gerado por tools/rebuild_sprites.py (variante 4-gray, 2 bits/pixel)\n"
+        gray_block += f"#define {prefix}_GRAY_W {size[0]}\n#define {prefix}_GRAY_H {size[1]}\n\n"
+        gray_block += fmt_array(f"{prefix}_GRAY", icon_to_c_array_2bpp(img, *size, thr=thr, crop=crop), *size) + "\n"
         gfname = os.path.join(gray_dir, f"{base}.h")
         with open(gfname, "w") as f:
             f.write(gray_block)

@@ -52,6 +52,10 @@ public:
     // (refresh parcial por regiao, sem reconstruir a tela inteira)
     void drawPetUpdates(const Pokemon& pet);
 
+    // Modo dormir: desenha "Zzz" perto da cabeca do sprite no drawPet.
+    // O main controla: liga na fase "pokemon" do sono, desliga ao acordar.
+    void setSleepZzz(bool on) { _sleepZzz = on; }
+
     // Atualiza apenas os digitos do relogio da tela de stats
     // (refresh parcial da regiao, sem reconstruir a tela inteira)
     void drawClockTick(time_t now);
@@ -116,6 +120,13 @@ private:
 
     // Caixa do texto "lvl N" (refresh parcial justo, sem piscar area maior)
     int _lastLvlX = 0, _lastLvlW = 0;
+
+    // "Zzz" perto da cabeca do sprite (modo dormir, fase pokemon)
+    bool _sleepZzz = false;
+
+    // Caixa do texto "Zzz" no buffer 1bpp: o sprite cinza e opaco e cobre
+    // o texto, entao o refresh() reaplica a regiao depois do blit2bpp
+    int _zzzX = 0, _zzzY = 0, _zzzW = 0, _zzzH = 0;
 };
 
 #endif

@@ -29,20 +29,11 @@ static int petBarTop(int row) {
 // Base (y do rodapé) do sprite na tela principal: o sprite cresce para cima
 #define SPRITE_BOTTOM 272
 
-// Icone de coco (1bpp, bit=1 = preto)
-#define POOP_ICON_W 12
-#define POOP_ICON_H 9
-static const unsigned char POOP_ICON[] = {
-    0x3C, 0x00,
-    0x7E, 0x00,
-    0xFF, 0x00,
-    0xFF, 0x00,
-    0x7E, 0x00,
-    0x3C, 0x00,
-    0x3C, 0x00,
-    0x3C, 0x00,
-    0x3C, 0x00
-};
+// Icone de coco (1bpp, bit=1 = preto) - asset gerado por
+// tools/rebuild_sprites.py a partir de tools/sprites/coco.png
+#define POOP_ICON_W COCO_W
+#define POOP_ICON_H COCO_H
+#define POOP_ICON COCO
 
 EPDisplay::EPDisplay()
     : _epd(nullptr), _graySprite(nullptr), _grayX(0), _grayY(0),
@@ -154,7 +145,7 @@ static const char* petStatusMessage(const Pokemon& pet) {
         if (pet.getWarmth() < WARMTH_SLOW_MIN) {
             return "Ovo esta frio!";
         } else if (pet.getWarmth() >= WARMTH_FAST_MIN) {
-            return "Aquecido! Quase la!";
+            return "Aquecido!";
         }
         return "Aque\xE7""a o ovo!";
     }
@@ -178,6 +169,7 @@ void EPDisplay::drawBarRow(int row, const char* label, int value, int maxVal) {
 void EPDisplay::drawPoops(const Pokemon& pet) {
     int level = pet.getDirt() / DIRT_LEVEL_STEP;   // 0..4
     if (level <= 0) return;
+    if (level > 2) level = 2;                      // max 2 cocos: 1 de cada lado
 
     int16_t sw, sh;
     getSpriteSize(pet, sw, sh);
@@ -185,9 +177,8 @@ void EPDisplay::drawPoops(const Pokemon& pet) {
 
     for (int k = 0; k < level; k++) {
         bool left = (k % 2 == 0);
-        int row = k / 2;
         int x = left ? spriteX - POOP_ICON_W - 6 : spriteX + sw + 6;
-        int y = SPRITE_BOTTOM - POOP_ICON_H - row * (POOP_ICON_H + 2);
+        int y = SPRITE_BOTTOM - POOP_ICON_H;
         if (x >= 0 && x + POOP_ICON_W <= DISPLAY_WIDTH) {
             drawSprite(x, y, POOP_ICON, POOP_ICON_W, POOP_ICON_H, GxEPD_BLACK);
         }
@@ -262,6 +253,26 @@ void EPDisplay::drawPet(const Pokemon& pet) {
     // Cocos no chao ao lado do sprite
     if (!pet.isEgg() && !pet.isDead()) {
         drawPoops(pet);
+    }
+
+    // Modo dormir: "Zzz" flutuando perto da cabeca (topo-direita do sprite).
+    // A posicao escala com o quadrado da imagem (48x48 do ovo ate 176x176
+    // dos megas), sempre sobrepondo o canto superior direito do quadrado.
+    if (_sleepZzz) {
+        _epd->setFont(&FreeMonoBold12pt7b);
+        int zx = spriteX + sw - 40;
+        int zy = spriteY + sh / 8 + 15;
+        _epd->setCursor(zx, zy);
+        _epd->print("Zzz");
+        // Guarda a caixa do texto: o sprite cinza (blit2bpp) e opaco e
+        // cobriria o texto; o refresh() reaplica a regiao por cima.
+        int16_t tx0, ty0;
+        uint16_t tw, th;
+        _epd->getTextBounds("Zzz", zx, zy, &tx0, &ty0, &tw, &th);
+        _zzzX = tx0;
+        _zzzY = ty0;
+        _zzzW = tw;
+        _zzzH = th;
     }
 
     // Mensagem em posicao fixa (logo abaixo da base do sprite grande)
@@ -413,11 +424,11 @@ void EPDisplay::updatePoopsPartial(const Pokemon& pet) {
     getSpriteSize(pet, sw, sh);
     int spriteX = (DISPLAY_WIDTH - sw) / 2;
 
-    // Regioes esq/dir (duas linhas de coco possiveis)
+    // Regioes esq/dir (1 coco de cada lado, no chao)
     int leftX = spriteX - POOP_ICON_W - 8;
     int rightX = spriteX + sw + 4;
-    int regY = SPRITE_BOTTOM - POOP_ICON_H - (POOP_ICON_H + 2) - 2;
-    int regH = (POOP_ICON_H + 2) * 2 + 4;
+    int regY = SPRITE_BOTTOM - POOP_ICON_H - 2;
+    int regH = POOP_ICON_H + 4;
     int regW = POOP_ICON_W + 4;
 
     // Apaga as regioes no buffer 1bpp
@@ -802,6 +813,16 @@ void EPDisplay::refresh() {
     if (_graySpriteSet) {
         _gray.blit2bpp(_grayX, _grayY, _graySprite, _grayW, _grayH);
         _graySpriteSet = false;
+    }
+    // O sprite cinza e opaco (blit2bpp) e cobre o texto desenhado no
+    // buffer 1bpp dentro da area dele; reaplica a caixa do "Zzz" por cima.
+    // Antes, limpa a regiao para branco: o texto preto seria ilegivel
+    // sobre pixels escuros do sprite (pichu/egg/scizor...); o fundo branco
+    // vira uma "legenda" legivel sobre qualquer sprite.
+    if (_zzzW > 0) {
+        _gray.clearRegion(_zzzX - 2, _zzzY - 2, _zzzW + 4, _zzzH + 4);
+        _gray.overlay1bppRect(_epd->uiBuffer(), _zzzX, _zzzY, _zzzW, _zzzH);
+        _zzzW = 0;
     }
     _gray.push();
 #else

@@ -44,3 +44,7 @@ time_t epochNow() {
     }
     return _fallbackEpoch + (time_t)((millis() - _bootMs) / 1000);
 }
+
+unsigned long timeKeeperUptimeSec() {
+    return (millis() - _bootMs) / 1000;
+}

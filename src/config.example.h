@@ -59,7 +59,8 @@
 #define HYGIENE_CRITICAL  15  // Abaixo disso, saude cai
 #define DIRT_CRITICAL     60  // Acima disso, saude cai
 
-// Cocos na tela do pet: nivel = sujeira / DIRT_LEVEL_STEP (0..4)
+// Cocos na tela do pet: nivel = sujeira / DIRT_LEVEL_STEP, capado em 2
+// (0 = sem coco, 1 = 1 coco, 2+ = 1 coco de cada lado)
 #define DIRT_LEVEL_STEP   25
 
 // ============================================================
@@ -190,7 +191,7 @@ static const PersonalitySpec PERSONALITIES[P_COUNT] = {
 // ============================================================
 #define WARMTH_DECAY         3   // Calor do ovo cai 3/min
 #define WARM_AMOUNT         20   // Alimentar aquece 20 de calor
-#define HATCH_TIME_MINUTES   5   // Minutos de incubacao para chocar
+#define HATCH_TIME_MINUTES  20   // Minutos de incubacao para chocar
 #define WARMTH_FAST_MIN     60   // Calor >= 60: incubacao normal (+1/min)
 #define WARMTH_SLOW_MIN     30   // Calor 30..59: incubacao devagar; <30: pausa
 
@@ -200,9 +201,12 @@ static const PersonalitySpec PERSONALITIES[P_COUNT] = {
 
 // Intervalos
 #define STATS_UPDATE_MS    1000   // Atualiza stats a cada 1s
-#define DISPLAY_REFRESH_MS 5000   // Força refresh da tela a cada 5s
 #define SAVE_INTERVAL_S    30     // Salva estado a cada 30s
 #define SLEEP_AFTER_MS     60000  // Vai dormir após 60s inativo
+
+// Modo dormir: alterna as telas enquanto nao ha interacao
+#define SLEEP_ZZZ_MIN      2      // 2 minutos mostrando "Zzzzzz..."
+#define SLEEP_PET_MIN      1      // 1 minuto mostrando o pokemon
 
 // ============================================================
 // EVOLUTION STAGES
@@ -238,7 +242,7 @@ static const char* STAGE_NAMES[] = {
 // DEMO MODE - Cicla estágios e telas com os botões (sem jogar)
 // FEED = próximo estágio | PLAY = próxima tela | STATUS = Stats
 // ============================================================
-#define DEMO_MODE 1
+#define DEMO_MODE 0
 
 // ============================================================
 // WIFI - Botoes virtuais via browser (http://<ip-do-esp32>)

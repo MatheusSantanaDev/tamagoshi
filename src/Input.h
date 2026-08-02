@@ -10,7 +10,11 @@ enum ButtonAction {
     ACTION_PLAY,      // Botão 2 - Brincar
     ACTION_STATUS,    // Botão 3 - Status (toggle)
     ACTION_CLEAN,     // Pressão longa Botão 2 - Limpar
-    ACTION_RESET      // Pressão longa Botão 3 - Reset
+    ACTION_RESET,     // Pressão longa Botão 3 - Reset
+    ACTION_DEV_STAGE, // [DEV] Força estágio (pendingValue = PokemonStage)
+    ACTION_DEV_DIRT,  // [DEV] Seta sujeira (pendingValue = 0..100)
+    ACTION_DEV_BAR,   // [DEV] Ajusta barra (pendingValue = idx<<8 | delta)
+    ACTION_DEV_SLEEP  // [DEV] Força o modo dormir na hora
 };
 
 class Input {

@@ -8,9 +8,10 @@
 
 Pokemon::Pokemon()
     : _stage(STAGE_EGG), _hunger(80), _happiness(70),
-      _health(100), _warmth(50), _energy(100), _sleep(100),
+      _health(100), _warmth(100), _energy(100), _sleep(100),
       _hygiene(100), _dirt(0), _incubationMinutes(0),
-      _incubationFraction(0.0f), _ageMinutes(0), _isAlive(true), _minutesAtCurrentStage(0),
+      _incubationFraction(0.0f), _ageMinutes(0),
+      _isAlive(true), _minutesAtCurrentStage(0),
       _lastTickEpoch(0), _personality(P_GULOSO), _criticalMinutes(0),
       _megaLifeMinutes(0), _megaContinuousMinutes(0),
       _lostCount(0), _winCount(0),
@@ -27,7 +28,7 @@ void Pokemon::reset() {
 
 void Pokemon::resetEgg() {
     _stage = STAGE_EGG;
-    _warmth = 50;
+    _warmth = 100;          // Ovo nasce aquecido por completo
     _incubationMinutes = 0;
     _incubationFraction = 0.0f;
     _hunger = 80;
@@ -109,7 +110,7 @@ void Pokemon::forceStage(PokemonStage stage) {
     _hunger = 80;
     _happiness = 70;
     _health = 100;
-    _warmth = 50;
+    _warmth = 100;
     _energy = 100;
     _sleep = 100;
     _hygiene = 100;
@@ -150,6 +151,17 @@ void Pokemon::testCycleBars() {
             else _dirt = min(_dirt + STEP, STATS_MAX);
             break;
     }
+}
+
+// [DEV] Sujeira direta (0..STATS_MAX) - para testar os cocos (0/1/2)
+void Pokemon::devSetDirt(int v) {
+    _dirt = constrain(v, STATS_MIN, STATS_MAX);
+}
+
+// [DEV] Ajusta uma barra direto: 0=energia, 1=sono, 2=higiene
+void Pokemon::devChangeBar(int idx, int delta) {
+    int* stat = (idx == 0) ? &_energy : (idx == 1) ? &_sleep : &_hygiene;
+    *stat = constrain(*stat + delta, STATS_MIN, STATS_MAX);
 }
 
 void Pokemon::update(unsigned long deltaMs) {
@@ -206,6 +218,9 @@ void Pokemon::tickMinute() {
         //   baixo (>= WARMTH_SLOW_MIN) -> devagar (+1 min a cada 2 min)
         //   critico (< WARMTH_SLOW_MIN) -> pausa
         // Nada regride: o ovo nunca perde progresso.
+        // Sem nenhum aquecimento o calor congela (< 30) antes de completar
+        // os HATCH_TIME_MINUTES; 1 aquecimento (FEED +20) basta para o ovo
+        // terminar a incubacao sem mais interacoes.
         if (_incubationMinutes < HATCH_TIME_MINUTES) {
             if (_warmth >= WARMTH_FAST_MIN) {
                 _incubationFraction += 1.0f;
@@ -304,6 +319,14 @@ void Pokemon::catchUpFrom(time_t now) {
     if (now <= _lastTickEpoch) return;
 
     int minutes = (int)((now - _lastTickEpoch) / 60);
+    if (minutes <= 0) return;
+
+    // Desconta o tempo ja simulado desde o boot (fallback): quando o NTP
+    // sincroniza depois do boot sem rede, _lastTickEpoch e antigo (ultimo
+    // save sincronizado) e o gap incluiria os minutos que ja rodaram em
+    // tempo real pelo update(). Sem isso, cada re-sync aplicaria o tempo
+    // duas vezes (pulo de dias no jogo).
+    minutes -= (int)(timeKeeperUptimeSec() / 60);
     if (minutes <= 0) return;
 
     if (minutes > MAX_CATCHUP_MINUTES) {

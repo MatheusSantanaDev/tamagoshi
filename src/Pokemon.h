@@ -30,6 +30,10 @@ public:
     // Demo: força um estágio com stats cheios
     void forceStage(PokemonStage stage);
 
+    // [DEV] Modo dev (guia de testes da pagina web)
+    void devSetDirt(int v);                    // sujeira direta 0..100
+    void devChangeBar(int idx, int delta);     // 0=energia, 1=sono, 2=higiene
+
     // [TESTE] Decai um stat por vez (energia->sono->higiene->coco) para
     // verificar o refresh parcial das barras. Sem risco de morte/evolucao.
     void testCycleBars();

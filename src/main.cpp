@@ -16,7 +16,7 @@ WebServer server(80);
 // ============================================================
 // Pagina web com os botoes virtuais
 // ============================================================
-static const char INDEX_HTML[] PROGMEM = R"rawliteral(
+static const char INDEX_HEAD[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -28,6 +28,7 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
          display: flex; flex-direction: column; align-items: center;
          min-height: 100vh; margin: 0; padding: 16px; box-sizing: border-box; }
   h1 { font-size: 1.4rem; margin: 8px 0; }
+  h2 { font-size: 1.1rem; margin: 24px 0 8px; color: #a6e3a1; }
   .status-box { background: #2a2a3e; padding: 8px 16px; border-radius: 20px;
                 font-size: .9rem; margin-bottom: 20px; }
   .btn { width: 100%; max-width: 400px; padding: 22px; margin: 10px 0;
@@ -39,6 +40,16 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
   .btn-clean { background: #27ae60; }
   .btn-stat  { background: #6c5ce7; }
   .btn-reset { background: #d63031; }
+  .dev-label { width: 100%; max-width: 400px; text-align: left; font-size: .9rem;
+               margin: 14px 0 6px; color: #cdd6f4; font-weight: bold; }
+  .dev-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+              max-width: 400px; }
+  .dev-btn { padding: 10px 14px; font-size: .95rem; font-weight: bold; color: #fff;
+             background: #45475a; border: none; border-radius: 10px;
+             cursor: pointer; touch-action: manipulation; }
+  .dev-btn:active { filter: brightness(0.85); transform: scale(0.97); }
+  .dev-note { margin-top: 16px; font-size: .8rem; color: #a6adc8;
+              max-width: 400px; text-align: center; }
 </style>
 </head>
 <body>
@@ -49,11 +60,63 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 <button class="btn btn-clean" onclick="press('clean')">LIMPAR</button>
 <button class="btn btn-stat"  onclick="press('status')">STATUS</button>
 <button class="btn btn-reset" onclick="press('reset')">RESETAR</button>
+)rawliteral";
+
+// Guia de testes - modo dev (sempre servida; e o canal de interferencia
+// do desenvolvedor no app em modo normal)
+static const char DEV_GUIDE_HTML[] PROGMEM = R"rawliteral(
+<hr style="width:100%; max-width:400px; border-color:#313244;">
+<h2>Guia de Testes (Dev)</h2>
+<div class="dev-label">Pokemon (estagio):</div>
+<div class="dev-grid">
+  <button class="dev-btn" onclick="press('stage','0')">Ovo</button>
+  <button class="dev-btn" onclick="press('stage','1')">Scyther</button>
+  <button class="dev-btn" onclick="press('stage','2')">Scizor</button>
+  <button class="dev-btn" onclick="press('stage','3')">Kleavor</button>
+  <button class="dev-btn" onclick="press('stage','4')">MegaScizor</button>
+  <button class="dev-btn" onclick="press('stage','5')">Pichu</button>
+  <button class="dev-btn" onclick="press('stage','6')">Pikachu</button>
+  <button class="dev-btn" onclick="press('stage','7')">Raichu</button>
+  <button class="dev-btn" onclick="press('stage','8')">MegaRaichuX</button>
+  <button class="dev-btn" onclick="press('stage','9')">MegaRaichuY</button>
+</div>
+<div class="dev-label">Coco (sujeira):</div>
+<div class="dev-grid">
+  <button class="dev-btn" onclick="press('dirt','0')">0 coco</button>
+  <button class="dev-btn" onclick="press('dirt','25')">1 coco</button>
+  <button class="dev-btn" onclick="press('dirt','50')">2 cocos</button>
+  <button class="dev-btn" onclick="press('dirt','75')">Sujeira alta</button>
+  <button class="dev-btn" onclick="press('dirt','100')">Sujinho</button>
+</div>
+<div class="dev-label">Barras (energia/sono/higiene):</div>
+<div class="dev-grid">
+  <button class="dev-btn" onclick="press('bar','0','-20')">Energia -20</button>
+  <button class="dev-btn" onclick="press('bar','0','20')">Energia +20</button>
+  <button class="dev-btn" onclick="press('bar','1','-20')">Sono -20</button>
+  <button class="dev-btn" onclick="press('bar','1','20')">Sono +20</button>
+  <button class="dev-btn" onclick="press('bar','2','-20')">Higiene -20</button>
+  <button class="dev-btn" onclick="press('bar','2','20')">Higiene +20</button>
+</div>
+<div class="dev-label">Sono:</div>
+<div class="dev-grid">
+  <button class="dev-btn" onclick="press('sleep','0')">DORMIR</button>
+  <button class="dev-btn" onclick="press('sleep','1')">POKEMON (dormindo)</button>
+</div>
+<div class="dev-note">Acoes dev voltam para a tela do pet. USE o botao LIMPAR
+para zerar os cocos depois do teste. DORMIR entra no sono direto na tela
+Zzz central; POKEMON (dormindo) pula para a tela do pokemon com o Zzz na
+cabeca (ele continua dormindo/recoverando); qualquer acao acorda.</div>
+)rawliteral";
+
+static const char INDEX_FOOT[] PROGMEM = R"rawliteral(
 <script>
-  function press(cmd) {
+  function press(cmd, v, d) {
     var s = document.getElementById('status');
+    var url = '/action?cmd=' + cmd;
+    if (v !== undefined) url += '&v=' + v;
+    if (d !== undefined) url += '&d=' + d;
     s.textContent = 'Enviando: ' + cmd + '...';
-    fetch('/action?cmd=' + cmd).then(function(r) {
+    fetch(url).then(function(r) {
       s.textContent = 'Enviado: ' + cmd + ' (' + r.status + ')';
     }).catch(function() {
       s.textContent = 'Falha ao conectar';
@@ -66,9 +129,15 @@ static const char INDEX_HTML[] PROGMEM = R"rawliteral(
 
 // Acoes pendentes vindas da pagina web
 volatile ButtonAction pendingAction = ACTION_NONE;
+volatile int pendingValue = 0;  // [DEV] valor das acoes dev (estagio/sujeira/barra)
 
 void handleRoot() {
-    server.send_P(200, "text/html", INDEX_HTML);
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "text/html", "");
+    server.sendContent_P(INDEX_HEAD);
+    server.sendContent_P(DEV_GUIDE_HTML);
+    server.sendContent_P(INDEX_FOOT);
+    server.sendContent("");
 }
 
 void handleAction() {
@@ -83,6 +152,21 @@ void handleAction() {
         pendingAction = ACTION_STATUS;
     } else if (cmd == "reset") {
         pendingAction = ACTION_RESET;
+    } else if (cmd == "stage") {
+        pendingValue = server.arg("v").toInt();
+        pendingAction = ACTION_DEV_STAGE;
+    } else if (cmd == "dirt") {
+        pendingValue = server.arg("v").toInt();
+        pendingAction = ACTION_DEV_DIRT;
+    } else if (cmd == "bar") {
+        int idx = server.arg("v").toInt();
+        int delta = server.arg("d").toInt();
+        pendingValue = (idx << 8) | (delta & 0xFF);
+        pendingAction = ACTION_DEV_BAR;
+    } else if (cmd == "sleep") {
+        // v=0 -> tela Zzz central; v=1 -> tela do pokemon (ainda dormindo)
+        pendingValue = server.arg("v").toInt();
+        pendingAction = ACTION_DEV_SLEEP;
     }
     server.send(200, "text/plain", "ok");
 }
@@ -116,8 +200,6 @@ unsigned long lastStatsUpdate = 0;
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastSave = 0;
 unsigned long lastInteraction = 0;
-unsigned long previousMillis = 0;
-unsigned long accumulatedDelta = 0;  // Delta acumulado para update do Pokémon
 
 // Assinatura dos dados exibidos na tela de status. Quando muda (minuto a
 // minuto), a tela e redesenhada; os segundos do relogio usam refresh parcial.
@@ -147,6 +229,8 @@ static uint32_t statsFingerprint() {
 // Sleep mode (futuro: deep sleep)
 // ============================================================
 bool sleeping = false;
+bool sleepShowZzz = true;          // modo dormir: true = Zzz, false = pokemon
+unsigned long lastSleepSwitch = 0; // inicio do passo atual do ciclo de sono
 
 // ============================================================
 void setup() {
@@ -200,7 +284,7 @@ void setup() {
     input.begin();
     display.begin();
 
-#ifdef DEMO_MODE
+#if DEMO_MODE
     pet.resetEgg();
     pet.forceStage(STAGE_EGG);
     gameState = STATE_IDLE;
@@ -224,7 +308,6 @@ void setup() {
     lastDisplayUpdate = now;
     lastSave = now;
     lastInteraction = now;
-    previousMillis = now;
 
     Serial.println("Pronto! Pressione os botoes para interagir.");
 }
@@ -232,8 +315,6 @@ void setup() {
 // ============================================================
 void loop() {
     unsigned long now = millis();
-    unsigned long delta = now - previousMillis;
-    previousMillis = now;
 
     server.handleClient();
 
@@ -243,7 +324,7 @@ void loop() {
         pendingAction = ACTION_NONE;
     }
 
-#ifdef DEMO_MODE
+#if DEMO_MODE
     // ========================================
     // DEMO: só navega pelas telas/estágios
     // ========================================
@@ -306,14 +387,10 @@ void loop() {
         }
     }
 
-    // Tela do pet: barras/cocos/idade com refresh parcial
+    // Tela do pet: barras/cocos/idade com refresh parcial.
+    // No modo dev, os cliques da guia de testes mexem nos stats e o
+    // drawPetUpdates atualiza so as regioes alteradas.
     if (gameState == STATE_IDLE) {
-        // [TESTE] Barras decaindo uma por vez (Ener->Sono->Hig->Coco)
-        static unsigned long lastBarTest = 0;
-        if (!pet.isEgg() && demoScreen == 0 && now - lastBarTest >= 1000) {
-            lastBarTest = now;
-            pet.testCycleBars();
-        }
         display.drawPetUpdates(pet);
     }
 
@@ -324,10 +401,19 @@ void loop() {
     // ========================================
     // 1. INPUT
     // ========================================
+    bool devAction = false;          // clique da guia de testes
+    bool wasPetScreen = true;        // tela do pet antes da acao
+    bool devFromOtherScreen = false; // dev veio de stats/sono/aviso -> redraw total
 
     if (action != ACTION_NONE) {
         lastInteraction = now;
         sleeping = false;
+        devAction = (action == ACTION_DEV_STAGE ||
+                     action == ACTION_DEV_DIRT ||
+                     action == ACTION_DEV_BAR ||
+                     action == ACTION_DEV_SLEEP);
+        wasPetScreen = (gameState == STATE_IDLE);
+        devFromOtherScreen = devAction && !wasPetScreen;
 
         switch (action) {
             case ACTION_FEED:
@@ -372,6 +458,38 @@ void loop() {
                 display.showMessage("Resetado!", "Novo ovo", "nasceu!");
                 delay(2000);
                 break;
+
+            // ========================================
+            // [DEV] Guia de testes da pagina web
+            // ========================================
+            case ACTION_DEV_STAGE:
+                pet.forceStage((PokemonStage)pendingValue);
+                Serial.printf("[DEV] Estagio: %s\n", pet.getStageName());
+                gameState = STATE_IDLE;
+                break;
+
+            case ACTION_DEV_DIRT:
+                pet.devSetDirt(pendingValue);
+                Serial.printf("[DEV] Sujeira: %d\n", pet.getDirt());
+                gameState = STATE_IDLE;
+                break;
+
+            case ACTION_DEV_BAR:
+                pet.devChangeBar(pendingValue >> 8, (int8_t)(pendingValue & 0xFF));
+                Serial.printf("[DEV] Barra ajustada\n");
+                gameState = STATE_IDLE;
+                break;
+
+            case ACTION_DEV_SLEEP:
+                // Forca o modo dormir na hora (mesmo ciclo do sono natural).
+                // pendingValue: 0 = tela Zzz central, 1 = pokemon dormindo.
+                sleeping = true;
+                gameState = STATE_SLEEPING;
+                sleepShowZzz = (pendingValue != 1);
+                lastSleepSwitch = now;
+                Serial.printf("[DEV] Dormindo! Fase: %s\n",
+                              sleepShowZzz ? "Zzz" : "Pokemon");
+                break;
         }
 
         // Marca para atualizar display
@@ -382,16 +500,19 @@ void loop() {
     // 2. UPDATE ESTADO
     // ========================================
     if (!pet.isDead() && (now - lastStatsUpdate >= STATS_UPDATE_MS)) {
+        // Tempo real decorrido desde o ultimo disparo: garante 1:1 com o
+        // relogio real mesmo se o loop ficar lento (refresh do e-paper,
+        // interacoes). O delta da iteracao atual nao reflete isso.
+        unsigned long elapsed = now - lastStatsUpdate;
         lastStatsUpdate = now;
 
         // Dormindo: recupera energia/sono (alem do decay normal)
         if (gameState == STATE_SLEEPING) {
-            pet.sleepRecovery(delta);
+            pet.sleepRecovery(elapsed);
         }
 
         // Acumula delta e atualiza
-        accumulatedDelta += STATS_UPDATE_MS;
-        pet.update(STATS_UPDATE_MS);
+        pet.update(elapsed);
 
         // Verifica evolução
         EvolutionResult evo = pet.checkEvolution();
@@ -427,7 +548,18 @@ void loop() {
     // ========================================
     // 3. DISPLAY
     // ========================================
-    bool forceUpdate = (action != ACTION_NONE);
+    // Feed/play/clean na tela do pet nao forcam rebuild: o drawPetUpdates
+    // (parcial) atualiza so as regioes afetadas (barras/cocos/frase) e, se
+    // o sprite mudar, ele mesmo faz o redraw completo. Rebuild completo so
+    // quando a tela muda (STATUS/RESET) ou a acao veio de outra tela.
+    bool forceUpdate;
+    if (devAction) {
+        forceUpdate = devFromOtherScreen;
+    } else if (action == ACTION_STATUS || action == ACTION_RESET) {
+        forceUpdate = true;
+    } else {
+        forceUpdate = !wasPetScreen;
+    }
     bool needRedraw = forceUpdate;
 
     if (gameState == STATE_STATS) {
@@ -438,9 +570,29 @@ void loop() {
             lastStatsFp = fp;
             needRedraw = true;
         }
-    } else if (gameState != STATE_IDLE &&
-               now - lastDisplayUpdate >= DISPLAY_REFRESH_MS) {
-        // Idle usa atualizacao parcial (drawPetUpdates), sem timer
+    } else if (gameState == STATE_SLEEPING) {
+        // Modo dormir: alterna Zzz (SLEEP_ZZZ_MIN) e a tela do pokemon
+        // (SLEEP_PET_MIN) enquanto nao ha interacao. Sem refresh periodico:
+        // so redesenha na troca (ou se o pet morrer dormindo).
+        if (pet.isDead()) {
+            gameState = STATE_DEAD;
+            lastDisplayUpdate = 0;
+            needRedraw = true;
+        } else {
+            unsigned long sleepStepMs =
+                (sleepShowZzz ? SLEEP_ZZZ_MIN : SLEEP_PET_MIN) * 60000UL;
+            if (now - lastSleepSwitch >= sleepStepMs) {
+                sleepShowZzz = !sleepShowZzz;
+                lastSleepSwitch = now;
+                lastDisplayUpdate = 0;
+                needRedraw = true;
+            }
+        }
+    } else if (lastDisplayUpdate == 0 && gameState != STATE_IDLE) {
+        // Transicao de tela sem acao (aviso critico, dormir forçado via
+        // dev, morte...): desenha a nova tela uma vez, sem refresh
+        // periodico. IDLE fica de fora para o refresh parcial continuar
+        // sendo usado nas acoes dev na tela do pet.
         needRedraw = true;
     }
 
@@ -449,6 +601,7 @@ void loop() {
 
         switch (gameState) {
             case STATE_IDLE:
+                display.setSleepZzz(false);
                 display.drawPet(pet);
                 break;
             case STATE_STATS:
@@ -458,7 +611,13 @@ void loop() {
                 display.drawWarning(pet);
                 break;
             case STATE_SLEEPING:
-                display.drawSleeping();
+                if (sleepShowZzz) {
+                    display.setSleepZzz(false);
+                    display.drawSleeping();
+                } else {
+                    display.setSleepZzz(true);
+                    display.drawPet(pet);
+                }
                 break;
             case STATE_DEAD:
                 display.drawDead(pet);
@@ -468,8 +627,9 @@ void loop() {
         }
     }
 
-    // Tela do pet: barras/cocos/idade com refresh parcial
-    if (gameState == STATE_IDLE) {
+    // Tela do pet: barras/cocos/idade com refresh parcial (tambem na fase
+    // "pokemon" do modo dormir, para mostrar a recuperacao ao vivo)
+    if (gameState == STATE_IDLE || (sleeping && !sleepShowZzz)) {
         display.drawPetUpdates(pet);
     }
 
@@ -494,6 +654,8 @@ void loop() {
         gameState != STATE_EVOLVING) {
         sleeping = true;
         gameState = STATE_SLEEPING;
+        sleepShowZzz = true;      // comeca sempre na tela de Zzz
+        lastSleepSwitch = now;
         lastDisplayUpdate = 0;
         Serial.println("Modo dormir...");
     }

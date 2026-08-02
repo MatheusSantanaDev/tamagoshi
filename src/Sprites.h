@@ -19,6 +19,7 @@
 #include "sprites/raichu.h"
 #include "sprites/megaraichux.h"
 #include "sprites/megaraichuy.h"
+#include "sprites/coco.h"
 
 // ============================================================
 // Aliases (variacoes de humor usam o mesmo sprite)

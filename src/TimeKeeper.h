@@ -12,5 +12,8 @@ void timeKeeperInit();
 bool timeKeeperTrySync(unsigned long timeoutMs);
 bool timeIsSynced();
 time_t epochNow();
+// Segundos desde o boot (para o catch-up descontar o tempo ja simulado
+// quando o NTP sincroniza depois do boot sem rede)
+unsigned long timeKeeperUptimeSec();
 
 #endif
