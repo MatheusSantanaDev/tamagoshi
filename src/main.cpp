@@ -79,6 +79,20 @@ static const char DEV_GUIDE_HTML[] PROGMEM = R"rawliteral(
   <button class="dev-btn" onclick="press('stage','7')">Raichu</button>
   <button class="dev-btn" onclick="press('stage','8')">MegaRaichuX</button>
   <button class="dev-btn" onclick="press('stage','9')">MegaRaichuY</button>
+  <button class="dev-btn" onclick="press('stage','10')">Elekid</button>
+  <button class="dev-btn" onclick="press('stage','11')">Electabuzz</button>
+  <button class="dev-btn" onclick="press('stage','12')">Electivire</button>
+  <button class="dev-btn" onclick="press('stage','13')">Magby</button>
+  <button class="dev-btn" onclick="press('stage','14')">Magmar</button>
+  <button class="dev-btn" onclick="press('stage','15')">Magmortar</button>
+  <button class="dev-btn" onclick="press('stage','16')">Rhyhorn</button>
+  <button class="dev-btn" onclick="press('stage','17')">Rhydon</button>
+  <button class="dev-btn" onclick="press('stage','18')">Rhyperior</button>
+  <button class="dev-btn" onclick="press('stage','19')">Onix</button>
+  <button class="dev-btn" onclick="press('stage','20')">Steelix</button>
+  <button class="dev-btn" onclick="press('stage','21')">MegaSteelix</button>
+  <button class="dev-btn" onclick="press('stage','22')">Tangela</button>
+  <button class="dev-btn" onclick="press('stage','23')">Tangrowth</button>
 </div>
 <div class="dev-label">Coco (sujeira):</div>
 <div class="dev-grid">

@@ -98,6 +98,34 @@ void EPDisplay::getSpriteSize(const Pokemon& pet, int16_t& w, int16_t& h) const 
             w = MEGARAICHUX_SPRITE_W; h = MEGARAICHUX_SPRITE_H; break;
         case STAGE_MEGARAICHUY:
             w = MEGARAICHUY_SPRITE_W; h = MEGARAICHUY_SPRITE_H; break;
+        case STAGE_ELEKID:
+            w = ELEKID_SPRITE_W;       h = ELEKID_SPRITE_H;       break;
+        case STAGE_ELECTABUZZ:
+            w = ELECTABUZZ_SPRITE_W;   h = ELECTABUZZ_SPRITE_H;   break;
+        case STAGE_ELECTIVIRE:
+            w = ELECTIVIRE_SPRITE_W;   h = ELECTIVIRE_SPRITE_H;   break;
+        case STAGE_MAGBY:
+            w = MAGBY_SPRITE_W;        h = MAGBY_SPRITE_H;        break;
+        case STAGE_MAGMAR:
+            w = MAGMAR_SPRITE_W;       h = MAGMAR_SPRITE_H;       break;
+        case STAGE_MAGMORTAR:
+            w = MAGMORTAR_SPRITE_W;    h = MAGMORTAR_SPRITE_H;    break;
+        case STAGE_RHYHORN:
+            w = RHYHORN_SPRITE_W;      h = RHYHORN_SPRITE_H;      break;
+        case STAGE_RHYDON:
+            w = RHYDON_SPRITE_W;       h = RHYDON_SPRITE_H;       break;
+        case STAGE_RHYPERIOR:
+            w = RHYPERIOR_SPRITE_W;    h = RHYPERIOR_SPRITE_H;    break;
+        case STAGE_ONIX:
+            w = ONIX_SPRITE_W;         h = ONIX_SPRITE_H;         break;
+        case STAGE_STEELIX:
+            w = STEELIX_SPRITE_W;      h = STEELIX_SPRITE_H;      break;
+        case STAGE_MEGASTEELIX:
+            w = MEGASTEELIX_SPRITE_W;  h = MEGASTEELIX_SPRITE_H;  break;
+        case STAGE_TANGELA:
+            w = TANGELA_SPRITE_W;      h = TANGELA_SPRITE_H;      break;
+        case STAGE_TANGROWTH:
+            w = TANGROWTH_SPRITE_W;    h = TANGROWTH_SPRITE_H;    break;
         default:
             w = EGG_SPRITE_W;       h = EGG_SPRITE_H;       break;
     }
@@ -525,6 +553,7 @@ static const char* shortStageName(PokemonStage stage) {
         case STAGE_MEGASCIZOR:  return "MegaScizor";
         case STAGE_MEGARAICHUX: return "MegaRaichuX";
         case STAGE_MEGARAICHUY: return "MegaRaichuY";
+        case STAGE_MEGASTEELIX: return "MegaSteelix";
         default:                return STAGE_NAMES[stage];
     }
 }

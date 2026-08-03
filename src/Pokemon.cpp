@@ -196,13 +196,16 @@ void Pokemon::sleepRecovery(unsigned long deltaMs) {
 // Estagio final da linha (pode evoluir para Mega ou e terminal):
 // tem relogio de vida proprio (FINAL_STAGE_LIFE_MIN)
 static bool isFinalStage(PokemonStage s) {
-    return s == STAGE_SCIZOR || s == STAGE_KLEAVOR || s == STAGE_RAICHU;
+    return s == STAGE_SCIZOR || s == STAGE_KLEAVOR || s == STAGE_RAICHU ||
+           s == STAGE_ELECTIVIRE || s == STAGE_MAGMORTAR ||
+           s == STAGE_RHYPERIOR || s == STAGE_STEELIX ||
+           s == STAGE_TANGROWTH;
 }
 
 // Forma Mega (relogio acumulado de vida proprio)
 static bool isMegaStage(PokemonStage s) {
     return s == STAGE_MEGASCIZOR || s == STAGE_MEGARAICHUX ||
-           s == STAGE_MEGARAICHUY;
+           s == STAGE_MEGARAICHUY || s == STAGE_MEGASTEELIX;
 }
 
 // Um minuto de jogo: idade, decaimento e incubacao
@@ -358,6 +361,8 @@ EvolutionResult Pokemon::checkEvolution() {
 
         // Evolucao normal: so o tempo no estagio
         case STAGE_PICHU:
+        case STAGE_ELEKID:
+        case STAGE_MAGBY:
             if (_minutesAtCurrentStage >= CLASS_TIMES_MIN[CLASS_BABY]) {
                 evolve();
                 return EVO_STAGE;
@@ -365,7 +370,19 @@ EvolutionResult Pokemon::checkEvolution() {
             break;
         case STAGE_SCYTHER:
         case STAGE_PIKACHU:
+        case STAGE_ELECTABUZZ:
+        case STAGE_MAGMAR:
+        case STAGE_RHYHORN:
+        case STAGE_ONIX:
+        case STAGE_TANGELA:
             if (_minutesAtCurrentStage >= CLASS_TIMES_MIN[CLASS_STAGE1]) {
+                evolve();
+                return EVO_STAGE;
+            }
+            break;
+        // Segundo estagio sem Mega: evolucao normal apos o tempo de S2
+        case STAGE_RHYDON:
+            if (_minutesAtCurrentStage >= CLASS_TIMES_MIN[CLASS_STAGE2]) {
                 evolve();
                 return EVO_STAGE;
             }
@@ -373,6 +390,7 @@ EvolutionResult Pokemon::checkEvolution() {
         // Mega: requisitos no estagio final (tempo + stats + criticos)
         case STAGE_SCIZOR:
         case STAGE_RAICHU:
+        case STAGE_STEELIX:
             if (_minutesAtCurrentStage >= CLASS_TIMES_MIN[CLASS_STAGE2]) {
                 if (megaRequirementsMet()) {
                     evolveToMega();
@@ -386,6 +404,7 @@ EvolutionResult Pokemon::checkEvolution() {
         case STAGE_MEGASCIZOR:
         case STAGE_MEGARAICHUX:
         case STAGE_MEGARAICHUY:
+        case STAGE_MEGASTEELIX:
             if (_megaContinuousMinutes >= MEGA_MAX_CONTINUOUS_MIN) {
                 revertFromMega();
                 return EVO_REVERT;
@@ -450,6 +469,8 @@ void Pokemon::revertFromMega() {
         _stage = STAGE_SCIZOR;
     } else if (_stage == STAGE_MEGARAICHUX || _stage == STAGE_MEGARAICHUY) {
         _stage = STAGE_RAICHU;
+    } else if (_stage == STAGE_MEGASTEELIX) {
+        _stage = STAGE_STEELIX;
     } else {
         return;
     }
@@ -594,6 +615,62 @@ const unsigned char* Pokemon::getCurrentSprite() const {
             if (isSad) return MEGARAICHUY_SAD;
             if (isHappy) return MEGARAICHUY_HAPPY;
             return MEGARAICHUY_IDLE;
+        case STAGE_ELEKID:
+            if (isSad) return ELEKID_SAD;
+            if (isHappy) return ELEKID_HAPPY;
+            return ELEKID_IDLE;
+        case STAGE_ELECTABUZZ:
+            if (isSad) return ELECTABUZZ_SAD;
+            if (isHappy) return ELECTABUZZ_HAPPY;
+            return ELECTABUZZ_IDLE;
+        case STAGE_ELECTIVIRE:
+            if (isSad) return ELECTIVIRE_SAD;
+            if (isHappy) return ELECTIVIRE_HAPPY;
+            return ELECTIVIRE_IDLE;
+        case STAGE_MAGBY:
+            if (isSad) return MAGBY_SAD;
+            if (isHappy) return MAGBY_HAPPY;
+            return MAGBY_IDLE;
+        case STAGE_MAGMAR:
+            if (isSad) return MAGMAR_SAD;
+            if (isHappy) return MAGMAR_HAPPY;
+            return MAGMAR_IDLE;
+        case STAGE_MAGMORTAR:
+            if (isSad) return MAGMORTAR_SAD;
+            if (isHappy) return MAGMORTAR_HAPPY;
+            return MAGMORTAR_IDLE;
+        case STAGE_RHYHORN:
+            if (isSad) return RHYHORN_SAD;
+            if (isHappy) return RHYHORN_HAPPY;
+            return RHYHORN_IDLE;
+        case STAGE_RHYDON:
+            if (isSad) return RHYDON_SAD;
+            if (isHappy) return RHYDON_HAPPY;
+            return RHYDON_IDLE;
+        case STAGE_RHYPERIOR:
+            if (isSad) return RHYPERIOR_SAD;
+            if (isHappy) return RHYPERIOR_HAPPY;
+            return RHYPERIOR_IDLE;
+        case STAGE_ONIX:
+            if (isSad) return ONIX_SAD;
+            if (isHappy) return ONIX_HAPPY;
+            return ONIX_IDLE;
+        case STAGE_STEELIX:
+            if (isSad) return STEELIX_SAD;
+            if (isHappy) return STEELIX_HAPPY;
+            return STEELIX_IDLE;
+        case STAGE_MEGASTEELIX:
+            if (isSad) return MEGASTEELIX_SAD;
+            if (isHappy) return MEGASTEELIX_HAPPY;
+            return MEGASTEELIX_IDLE;
+        case STAGE_TANGELA:
+            if (isSad) return TANGELA_SAD;
+            if (isHappy) return TANGELA_HAPPY;
+            return TANGELA_IDLE;
+        case STAGE_TANGROWTH:
+            if (isSad) return TANGROWTH_SAD;
+            if (isHappy) return TANGROWTH_HAPPY;
+            return TANGROWTH_IDLE;
         default:
             return SCYTHER_IDLE;
     }
@@ -653,6 +730,62 @@ const unsigned char* Pokemon::getCurrentGraySprite() const {
             if (isSad) return MEGARAICHUY_GRAY_SAD;
             if (isHappy) return MEGARAICHUY_GRAY_HAPPY;
             return MEGARAICHUY_GRAY_IDLE;
+        case STAGE_ELEKID:
+            if (isSad) return ELEKID_GRAY_SAD;
+            if (isHappy) return ELEKID_GRAY_HAPPY;
+            return ELEKID_GRAY_IDLE;
+        case STAGE_ELECTABUZZ:
+            if (isSad) return ELECTABUZZ_GRAY_SAD;
+            if (isHappy) return ELECTABUZZ_GRAY_HAPPY;
+            return ELECTABUZZ_GRAY_IDLE;
+        case STAGE_ELECTIVIRE:
+            if (isSad) return ELECTIVIRE_GRAY_SAD;
+            if (isHappy) return ELECTIVIRE_GRAY_HAPPY;
+            return ELECTIVIRE_GRAY_IDLE;
+        case STAGE_MAGBY:
+            if (isSad) return MAGBY_GRAY_SAD;
+            if (isHappy) return MAGBY_GRAY_HAPPY;
+            return MAGBY_GRAY_IDLE;
+        case STAGE_MAGMAR:
+            if (isSad) return MAGMAR_GRAY_SAD;
+            if (isHappy) return MAGMAR_GRAY_HAPPY;
+            return MAGMAR_GRAY_IDLE;
+        case STAGE_MAGMORTAR:
+            if (isSad) return MAGMORTAR_GRAY_SAD;
+            if (isHappy) return MAGMORTAR_GRAY_HAPPY;
+            return MAGMORTAR_GRAY_IDLE;
+        case STAGE_RHYHORN:
+            if (isSad) return RHYHORN_GRAY_SAD;
+            if (isHappy) return RHYHORN_GRAY_HAPPY;
+            return RHYHORN_GRAY_IDLE;
+        case STAGE_RHYDON:
+            if (isSad) return RHYDON_GRAY_SAD;
+            if (isHappy) return RHYDON_GRAY_HAPPY;
+            return RHYDON_GRAY_IDLE;
+        case STAGE_RHYPERIOR:
+            if (isSad) return RHYPERIOR_GRAY_SAD;
+            if (isHappy) return RHYPERIOR_GRAY_HAPPY;
+            return RHYPERIOR_GRAY_IDLE;
+        case STAGE_ONIX:
+            if (isSad) return ONIX_GRAY_SAD;
+            if (isHappy) return ONIX_GRAY_HAPPY;
+            return ONIX_GRAY_IDLE;
+        case STAGE_STEELIX:
+            if (isSad) return STEELIX_GRAY_SAD;
+            if (isHappy) return STEELIX_GRAY_HAPPY;
+            return STEELIX_GRAY_IDLE;
+        case STAGE_MEGASTEELIX:
+            if (isSad) return MEGASTEELIX_GRAY_SAD;
+            if (isHappy) return MEGASTEELIX_GRAY_HAPPY;
+            return MEGASTEELIX_GRAY_IDLE;
+        case STAGE_TANGELA:
+            if (isSad) return TANGELA_GRAY_SAD;
+            if (isHappy) return TANGELA_GRAY_HAPPY;
+            return TANGELA_GRAY_IDLE;
+        case STAGE_TANGROWTH:
+            if (isSad) return TANGROWTH_GRAY_SAD;
+            if (isHappy) return TANGROWTH_GRAY_HAPPY;
+            return TANGROWTH_GRAY_IDLE;
         default:
             return SCYTHER_GRAY_IDLE;
     }

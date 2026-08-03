@@ -14,9 +14,14 @@ Uso:
 import sys
 import os
 import re
+import math
+from collections import Counter, deque
 from PIL import Image, ImageFilter
 
 # Estagios: (base do arquivo em tools/sprites, prefixo C, tamanho)
+# Molduras nao quadradas preservam a proporcao da arte (ex.: magmar/
+# magmortar/onix sao paisagem). Tamanhos crescem com a linha (baby < S1 <
+# S2 < final).
 STAGES = [
     ("egg",         "EGG",       (48, 48)),
     ("scyther",     "SCYTHER",   (160, 160)),
@@ -28,11 +33,40 @@ STAGES = [
     ("raichu",      "RAICHU",    (160, 160)),
     ("megaraichux", "MEGARAICHUX", (176, 176)),
     ("megaraichuy", "MEGARAICHUY", (176, 176)),
+    # Linha Elekid (com baby): 96 -> 144 -> 160
+    ("elekid",      "ELEKID",     (96, 79)),
+    ("electabuzz",  "ELECTABUZZ", (144, 146)),
+    ("electivire",  "ELECTIVIRE", (160, 154)),
+    # Linha Magby (com baby): 96 -> 144 -> 160
+    ("magby",       "MAGBY",      (96, 126)),
+    ("magmar",      "MAGMAR",     (144, 94)),
+    ("magmortar",   "MAGMORTAR",  (160, 118)),
+    # Linha Rhyhorn (sem baby): 160 -> 160 -> 176
+    ("rhyhorn",     "RHYHORN",    (160, 130)),
+    ("rhydon",      "RHYDON",     (160, 139)),
+    ("rhyperior",   "RHYPERIOR",  (176, 152)),
+    # Linha Onix (sem baby + Mega): 160 -> 160 -> 176
+    ("onix",        "ONIX",       (160, 137)),
+    ("steelix",     "STEELIX",    (160, 160)),
+    ("megasteelix", "MEGASTEELIX", (176, 167)),
+    # Linha Tangela (sem baby, 2 estagios): 160 -> 160
+    ("tangela",     "TANGELA",    (160, 152)),
+    ("tangrowth",   "TANGROWTH",  (160, 148)),
 ]
 
 # Recorte automatico do conteudo (foto com muita margem vazia):
 # preenche a moldura - 1.0 = sem recorte, 0.92 = conteudo ocupa 92%.
 CROP = {"scizor": 0.92}
+
+# Altura do CORPO em pixels na tela final (nao a moldura!) por estagio.
+# Referencia aprovada: baby 96 | S1 144 | sem-baby/final 160 | mega 176.
+BODY_H = {
+    "elekid": 96, "electabuzz": 144, "electivire": 160,
+    "magby": 96, "magmar": 144, "magmortar": 160,
+    "rhyhorn": 160, "rhydon": 160, "rhyperior": 176,
+    "onix": 160, "steelix": 160, "megasteelix": 176,
+    "tangela": 160, "tangrowth": 160,
+}
 
 # Sprites com arte em paisagem: centralizar na moldura deixa a imagem
 # "flutuando" acima da base (pe da sprite nao encosta no chao). Ancorar
@@ -113,7 +147,126 @@ def color_binarize(img, dark_lum=100, green_min=110, green_delta=25):
                 opx[x, y] = 0
     return out
 
+def semantic_mask(canvas, lum, w, h, dark_lum=65, blue_d=20, feet_r=140,
+                  mask_lum=None):
+    """Silhueta semantica: corpo azul (b > r+blue_d), pes vermelhos
+    (r > feet_r e VERMELHO SATURADO - senao o fundo branco cai dentro),
+    ou pixel escuro (lum < mask_lum, padrao dark_lum).
+    Imagem "1": 0 = pokemon, 1 = fundo. Base do 1bpp e do 4-gray de
+    tangela/tangrowth. No 4-gray o mask_lum maior (95) inclui as sombras
+    NEUTRAS (ex.: tangrowth RGB 74,74,82, L~75) que nao sao azuis nem
+    vermelhas nem escuras o bastante - senao viram branco no display."""
+    if mask_lum is None:
+        mask_lum = dark_lum
+    px = canvas.load()
+    lx = lum.load()
+    out = Image.new("1", (w, h), 1)
+    op = out.load()
+    for y in range(h):
+        for x in range(w):
+            rr, gg, bb = px[x, y][:3]
+            red_sat = rr > feet_r and rr > gg + 40 and rr > bb + 40
+            if (bb > rr + blue_d) or red_sat or lx[x, y] < mask_lum:
+                op[x, y] = 0
+    return out
+
+def pokemon_1bpp(img, w, h, dark_lum=65, edge_thr=120, blue_d=20, feet_r=140):
+    """1bpp por COR + bordas para artes escuras de corpo colorido
+    (tangela/tangrowth): o pokemon e separado do fundo pela SATURACAO/cor
+    (corpo azul: b > r+blue_d; pes vermelhos: r > feet_r), depois o bitmap
+    final = so contornos (FIND_EDGES) + pixels realmente escuros
+    (lum < dark_lum) em preto; corpo/fundo em branco. Estilo GameBoy.
+    Nao usa Sauvola."""
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(bg, img)
+    rgb = img.convert("RGB")
+    lum = img.convert("L")
+    lx = lum.load()
+    W, H = w, h
+
+    # Silhueta do pokemon: pela cor (corpo azul, pes vermelhos) OU pixel
+    # escuro (contorno azul/preto). Sem isso, o contorno escuro vira um
+    # "buraco" dentro da silhueta e o anel sai duplo.
+    sm = semantic_mask(rgb, lum, W, H, dark_lum, blue_d, feet_r).load()
+    sil = [[sm[x, y] == 0 for x in range(W)] for y in range(H)]
+
+    # Contorno externo: silhueta vizinha(4) ao que NAO e pokemon.
+    ring = [[False] * W for _ in range(H)]
+    for y in range(H):
+        for x in range(W):
+            if not sil[y][x]:
+                continue
+            if (x > 0 and not sil[y][x - 1]) or \
+               (x < W - 1 and not sil[y][x + 1]) or \
+               (y > 0 and not sil[y - 1][x]) or \
+               (y < H - 1 and not sil[y + 1][x]):
+                ring[y][x] = True
+
+    edges = lum.filter(ImageFilter.FIND_EDGES)
+    ex = edges.load()
+
+    out = Image.new("1", (W, H), 1)
+    opx = out.load()
+    for y in range(H):
+        for x in range(W):
+            v = lx[x, y]
+            if v < dark_lum:
+                opx[x, y] = 0
+            elif sil[y][x] and (ring[y][x] or ex[x, y] > edge_thr):
+                opx[x, y] = 0
+            else:
+                opx[x, y] = 1
+    return out
+
+def gray_array_to_img(bytes_, w, h):
+    """2bpp -> imagem RGB (0=preto, 1=cinza escuro, 2=cinza claro, 3=br.)"""
+    lut = [(0, 0, 0), (85, 85, 85), (170, 170, 170), (255, 255, 255)]
+    img = Image.new("RGB", (w, h))
+    px = img.load()
+    byte_width = (w + 3) // 4
+    for y in range(h):
+        for x in range(w):
+            byte = bytes_[y * byte_width + x // 4]
+            v = (byte >> (6 - 2 * (x % 4))) & 3
+            px[x, y] = lut[v]
+    return img
+
+def overlay_2bpp(arr, img1, w, h):
+    """Forca v0 (preto) no array 2bpp onde a imagem 1bpp esta em preto:
+    o traco (contorno/bordas/sombreamento) do 1bpp por cima do tom
+    4-gray - estilo line-art. Fundo (1bpp branco) intacto."""
+    px = img1.load()
+    bw = w // 4
+    for y in range(h):
+        for x in range(w):
+            if px[x, y] == 0:
+                i = y * bw + x // 4
+                arr[i] &= ~(3 << (6 - 2 * (x % 4)))
+    return arr
+
+def write_preview(path, img, scale=4):
+    img = img.convert("RGB").resize((img.width * scale, img.height * scale),
+                                    Image.NEAREST)
+    img.save(path)
+
 def to_c_array(img, w, h, color_mode=False):
+    if img.mode == "1":
+        # Mascara ja binarizada (ex.: pokemon_1bpp) - sem Sauvola.
+        px = img.load()
+        out = []
+        for y in range(h):
+            byte = 0
+            for x in range(w):
+                bit = 1 if px[x, y] == 0 else 0
+                byte = (byte << 1) | bit
+                if x % 8 == 7:
+                    out.append(byte)
+                    byte = 0
+            if w % 8 != 0:
+                out.append(byte << (8 - (w % 8)))
+        return out
     if img.mode in ("RGBA", "LA", "P"):
         img = img.convert("RGBA")
         bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
@@ -186,6 +339,23 @@ GRAY_MODES = {
     "raichu": ("lum", 230, 195),
     "megaraichux": ("lum", 180, 110),
     "megaraichuy": ("lum", 180, 110),
+    # Novos: limiares "lum" derivados da distribuicao de luminancia do
+    # corpo (p90 ~ wthr, p50 ~ gthr). Ajuste visual se algum estagio ficar
+    # chapado ou borrado - mesmo processo dos originais.
+    "elekid": ("lum", 210, 150, True),
+    "electabuzz": ("lum", 225, 160, True),
+    "electivire": ("lum", 245, 210, True),
+    "magby": ("lum", 210, 130, True),
+    "magmar": ("lum", 245, 200, True),
+    "magmortar": ("lum", 245, 205, True),
+    "rhyhorn": ("lum", 200, 140, True),
+    "rhydon": ("lum", 215, 140, True),
+    "rhyperior": ("lum", 180, 110),
+    "onix": ("lum", 240, 140, True),
+    "steelix": ("lum", 230, 140, True),
+    "megasteelix": ("lum", 230, 140, True),
+    "tangela": ("tone", 200, 150, 55, True, True, True, 1, 2, True),
+    "tangrowth": ("tone", 200, 145, 55, True, True, True, 1, 2, True),
 }
 DEFAULT_GRAY_MODE = ("lum", 200, 120)
 
@@ -199,14 +369,35 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
     if mode is None:
         mode = DEFAULT_GRAY_MODE
     mode_name = mode[0]
+    clean_bg = False  # forca fundo (fora da silhueta) branco puro
     if mode_name == "color":
         _, lo, hi, wthr, gthr = mode
     elif mode_name == "semantic":
         _, black_max, white_min, wthr, gthr, detail_thr, band_edge = mode[:7]
         band_head = mode[7] if len(mode) > 7 else 0
         band_zone = mode[8] if len(mode) > 8 else None
+    elif mode_name == "tone":
+        # ("tone", wthr, gthr, blk, [clean_bg], [outline], [semantic], [boost])
+        # - silhueta so delimita corpo/fundo; o corpo mapeia por LUMINANCIA
+        # (azul/verde escuro -> cinza, so o < blk vira preto).
+        # outline=True pinta de preto o contorno (1px) da silhueta;
+        # semantic=True usa a silhueta por COR (corpo azul/vermelho/escuro)
+        # em vez da Sauvola - sem ela o corpo azul cai fora e vira branco.
+        # boost (0-2) clareia os tons da silhueta em N niveis: o painel
+        # 4-gray (SSD1681) rende v1/v2 mais escuros que o preview linear,
+        # entao boost=1 (v1->v2, v2->v3) compensa. Anel/fundo intactos.
+        # boost_cap limita o nivel final: (boost=1, cap=2) so levanta o
+        # extremo escuro (v0->v1, v1->v2) e nao deixa o corpo virar branco.
+        wthr, gthr, blk = mode[1], mode[2], mode[3]
+        clean_bg = mode[4] if len(mode) > 4 else True
+        outline = mode[5] if len(mode) > 5 else False
+        semantic = mode[6] if len(mode) > 6 else False
+        boost = mode[7] if len(mode) > 7 else 0
+        boost_cap = mode[8] if len(mode) > 8 else 3
+        overlay = mode[9] if len(mode) > 9 else False
     else:
-        _, wthr, gthr = mode
+        wthr, gthr = mode[1], mode[2]
+        clean_bg = mode[3] if len(mode) > 3 else False
     if img.mode in ("RGBA", "LA", "P"):
         img = img.convert("RGBA")
         bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
@@ -360,19 +551,107 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
         else:
             canvas.paste(rgb, ((w - rgb.width) // 2, (h - rgb.height) // 2))
         lum = canvas.convert("L")
-        mask = sauvola(lum)
-        m = mask.load()
-        mt = m
+        if mode_name == "tone" and semantic:
+            # mask_lum 95: sombras neutras (L 65-95, nao azuis/vermelhas)
+            # entram na silhueta e viram cinza escuro em vez de branco.
+            mt = semantic_mask(canvas, lum, w, h, mask_lum=95).load()
+        else:
+            mask = sauvola(lum)
+            mt = mask.load()
+        if mode_name == "tone" and outline:
+            # contorno 1px preto: silhueta vizinha(4) ao que NAO e pokemon.
+            ring = Image.new("L", (w, h), 255)
+            rx = ring.load()
+            if semantic:
+                # anel INTERNO (em cima da silhueta): pega a borda do corpo
+                # e cobre o anti-aliasing do resize (sem "sombra" opaca).
+                for yy in range(h):
+                    for xx in range(w):
+                        if mt[xx, yy] != 0:
+                            continue
+                        if ((xx > 0 and mt[xx - 1, yy] != 0) or
+                            (xx < w - 1 and mt[xx + 1, yy] != 0) or
+                            (yy > 0 and mt[xx, yy - 1] != 0) or
+                            (yy < h - 1 and mt[xx, yy + 1] != 0)):
+                            rx[xx, yy] = 0
+            else:
+                # contorno externo (1px): flood a partir da borda da imagem
+                # pelos pixels fora da silhueta; silhueta vizinha(4) = anel.
+                outside = [[False] * w for _ in range(h)]
+                stk = []
+                for yy in range(h):
+                    for xx in (0, w - 1):
+                        if mt[xx, yy] != 0 and not outside[yy][xx]:
+                            outside[yy][xx] = True
+                            stk.append((xx, yy))
+                for xx in range(w):
+                    for yy in (0, h - 1):
+                        if mt[xx, yy] != 0 and not outside[yy][xx]:
+                            outside[yy][xx] = True
+                            stk.append((xx, yy))
+                while stk:
+                    cx, cy = stk.pop()
+                    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                        nx, ny = cx + dx, cy + dy
+                        if 0 <= nx < w and 0 <= ny < h and not outside[ny][nx] \
+                           and mt[nx, ny] != 0:
+                            outside[ny][nx] = True
+                            stk.append((nx, ny))
+                for yy in range(h):
+                    for xx in range(w):
+                        if mt[xx, yy] == 0 and (
+                            (xx > 0 and outside[yy][xx - 1]) or
+                            (xx < w - 1 and outside[yy][xx + 1]) or
+                            (yy > 0 and outside[yy - 1][xx]) or
+                            (yy < h - 1 and outside[yy + 1][xx])):
+                            rx[xx, yy] = 0
         pt = lum.load()
+        if mode_name == "tone" and semantic:
+            # Limiares ADAPTATIVOS por percentil da arte (so a silhueta):
+            # distribui a arte nos 4 tons preservando a hierarquia original
+            # (sombra < corpo < destaque). p15 -> v0/v1, p45 -> v1/v2,
+            # p80 -> v2/v3; clamps garantem niveis nao-vazios.
+            hist = [0] * 256
+            for yy in range(h):
+                for xx in range(w):
+                    if mt[xx, yy] == 0:
+                        hist[pt[xx, yy]] += 1
+            total = sum(hist) or 1
+
+            def pct(p):
+                acc = 0
+                for L in range(256):
+                    acc += hist[L]
+                    if acc >= total * p / 100:
+                        return L
+                return 255
+
+            t0 = min(pct(15), 70)
+            t1 = max(pct(45), t0 + 15)
+            t2 = max(pct(80), t1 + 30)
 
     out = []
     for y in range(h):
         byte = 0
         for x in range(w):
-            if mt[x, y] == 0:
+            old = pt[x, y]
+            if mode_name == "tone":
+                if outline and rx[x, y] == 0:
+                    v = 0
+                elif mt[x, y] == 0 or not clean_bg:
+                    if semantic:
+                        v = 3 if old >= t2 else 2 if old >= t1 else (1 if old >= t0 else 0)
+                        if boost:
+                            v = min(boost_cap, v + boost)
+                    else:
+                        v = 3 if old >= wthr else 2 if old >= gthr else (1 if old >= blk else 0)
+                else:
+                    v = 3
+            elif mt[x, y] == 0:
                 v = 0
+            elif clean_bg:
+                v = 3
             else:
-                old = pt[x, y]
                 v = 3 if old >= wthr else 2 if old >= gthr else 1
             byte = (byte << 2) | v
             if x % 4 == 3:
@@ -480,6 +759,139 @@ def crop_content(img, fill):
            min(w, int(x1 + 1 + pad_w)), min(h, int(y1 + 1 + pad_h)))
     return img.crop(box)
 
+def fit_body(img, body_h, fill=0.97, max_w=232, resample=Image.LANCZOS):
+    """Dimensiona pelo CORPO, nao pela moldura: recorta as margens e
+    ajusta para o corpo do sprite ocupar ~`body_h` px de altura — comum a
+    todos os estagios da mesma classe (o tamanho visual fica igual, ex.:
+    todos os babies com corpo de ~96px). Preserva a proporcao da arte
+    (molduras nao quadradas) e a largura respeita o limite da tela.
+    resample: LANCZOS (padrao, fotografia) ou BOX (pixel art - reduz em
+    passos de 2x para nao fundir contorno/corpo no downscale)."""
+    img = crop_content(img, fill)          # margens removidas, corpo = fill da moldura
+    w, h = img.size
+    th = round(body_h / fill)              # altura da moldura final
+    tw = round(th * w / h / 4) * 4         # largura pela proporcao (multipla de 4)
+    if tw > max_w:                         # largura maxima na tela (240px)
+        tw = max_w - (max_w % 4)
+        th = round(tw * h / w)
+    if resample == Image.BOX:
+        # Reducao em passos de 2x (pixel art) ate 2x o alvo, depois BOX.
+        cw, ch = w, h
+        while cw > 2 * tw or ch > 2 * th:
+            nw = max(tw, cw // 2)
+            nh = max(th, ch // 2)
+            img = img.resize((nw, nh), Image.BOX)
+            cw, ch = nw, nh
+    return img.resize((tw, th), resample)
+
+def remove_bg(img, tol=25, sat=20, peel=True, peel_cap=0.10):
+    """Remove o fundo conectado as bordas. Funciona com fundos de VARIOS
+    tons (branco, cinza-claro ~237, preto e mesclas estilo 'rajado').
+    1. Loop principal: recalcula a cor dominante da borda e remove a regiao
+       conectada a ela ate sobrar so o corpo (borda saturada = corpo).
+    2. peel=True: remove tambem CLUSTERS pequenos e NEUTROS conectados a
+       borda (listras/sujeira), cada um com a propria cor de referencia,
+       DESDE QUE o cluster nao estoure `peel_cap` da imagem — se estourar
+       (e o corpo), descarta tudo e para. Nao come o corpo."""
+    img = img.convert("RGB")
+    w, h = img.size
+    px = img.load()
+    out = img.copy()
+    o = out.load()
+    removed = [[False] * w for _ in range(h)]
+    area = w * h
+
+    def border_dominant():
+        counts = Counter()
+        for x in range(w):
+            for y in (0, h - 1):
+                if not removed[y][x]:
+                    p = px[x, y]
+                    counts[(p[0] // 16 * 16 + 8, p[1] // 16 * 16 + 8,
+                            p[2] // 16 * 16 + 8)] += 1
+        for y in range(h):
+            for x in (0, w - 1):
+                if not removed[y][x]:
+                    p = px[x, y]
+                    counts[(p[0] // 16 * 16 + 8, p[1] // 16 * 16 + 8,
+                            p[2] // 16 * 16 + 8)] += 1
+        return counts
+
+    def flood(ref, commit=True, cap=0):
+        """Flood da borda removendo pixels <= tol de ref. Se cap>0 e o
+        cluster passar de cap*area, desfaz (nao commita) e retorna False."""
+        comp = []
+        stack = []
+        seeds = []
+        for x in range(w):
+            for y in (0, h - 1):
+                if not removed[y][x] and math.dist(px[x, y], ref) <= tol:
+                    comp.append((x, y))
+                    stack.append((x, y))
+        for y in range(h):
+            for x in (0, w - 1):
+                if not removed[y][x] and math.dist(px[x, y], ref) <= tol:
+                    comp.append((x, y))
+                    stack.append((x, y))
+        used = set()
+        while stack:
+            x, y = stack.pop()
+            if (x, y) in used:
+                continue
+            used.add((x, y))
+            if cap and len(used) > area * cap:
+                return False
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h and not removed[ny][nx] \
+                   and (nx, ny) not in used \
+                   and math.dist(px[nx, ny], ref) <= tol:
+                    stack.append((nx, ny))
+        for x, y in used:
+            removed[y][x] = True
+            o[x, y] = (255, 255, 255)
+        return True
+
+    while True:
+        counts = border_dominant()
+        if not counts:
+            break
+        ref = counts.most_common(1)[0][0]
+        if max(ref) - min(ref) > sat:
+            break
+        if not flood(ref):
+            break
+
+    if peel:
+        while True:
+            seed = None
+            for x in range(w):
+                for y in (0, h - 1):
+                    if not removed[y][x]:
+                        p = px[x, y]
+                        if max(p) - min(p) <= 90 and max(p) < 235:
+                            seed = (x, y, p)
+                            break
+                if seed:
+                    break
+            if not seed:
+                for y in range(h):
+                    for x in (0, w - 1):
+                        if not removed[y][x]:
+                            p = px[x, y]
+                            if max(p) - min(p) <= 90 and max(p) < 235:
+                                seed = (x, y, p)
+                                break
+                    if seed:
+                        break
+            if not seed:
+                break
+            ref = (seed[2][0] // 16 * 16 + 8, seed[2][1] // 16 * 16 + 8,
+                   seed[2][2] // 16 * 16 + 8)
+            if not flood(ref, cap=peel_cap):
+                break
+    return out
+
 def parse_array(text, name):
     m = re.search(r"static const unsigned char %s\[\] PROGMEM = \{(.*?)\};" % name, text, re.S)
     if not m:
@@ -542,16 +954,37 @@ def main():
 
     # 2) Demais estagios: 1 array por estagio (sauvola)
     arrays = {STAGES[0][0]: egg_arrays}
+    sizes = {STAGES[0][0]: STAGES[0][2]}
     aliases = []
     for base, prefix, size in STAGES[1:]:
         if base in pngs:
             img = Image.open(pngs[base])
-            img = crop_content(img, CROP.get(base, 1.0))
-            arr = to_c_array(img, *size)
+            if base in BODY_H:
+                # Novos: remove o fundo e dimensiona pelo CORPO
+                img = fit_body(remove_bg(img), BODY_H[base])
+                fw, fh = img.size
+                if base in ("tangela", "tangrowth"):
+                    # 1bpp por cor/bordas: contorno + escuros -> preto,
+                    # corpo azul/verde -> branco. BOX em passos de 2x
+                    # (pixel art) em vez de LANCZOS.
+                    img2 = fit_body(remove_bg(img), BODY_H[base],
+                                    resample=Image.BOX)
+                    fw, fh = img2.size
+                    arr = to_c_array(pokemon_1bpp(img2, fw, fh), fw, fh)
+                else:
+                    arr = to_c_array(img, fw, fh)
+            else:
+                # Existentes: pipeline original (recorte + fita no canvas) -
+                # NAO mexe no visual ja aprovado.
+                img = crop_content(img, CROP.get(base, 1.0))
+                fw, fh = size
+                arr = to_c_array(img, fw, fh)
+            sizes[base] = (fw, fh)
             arrays[base] = [(f"{prefix}_IDLE", arr)]
             aliases.append(f"#define {prefix}_HAPPY {prefix}_IDLE")
             aliases.append(f"#define {prefix}_SAD   {prefix}_IDLE")
         elif old:
+            sizes[base] = size
             fname = f"{prefix}_IDLE"
             arr = parse_array(old, fname)
             img = array_to_img(arr, 32, 32)
@@ -568,10 +1001,11 @@ def main():
     for base, prefix, size in STAGES:
         if base not in arrays:
             continue
+        fw, fh = sizes[base]
         block = "// Gerado por tools/rebuild_sprites.py\n"
-        block += stage_header(prefix, size)
+        block += stage_header(prefix, (fw, fh))
         for name, arr in arrays[base]:
-            block += "\n" + fmt_array(name, arr, *size) + "\n"
+            block += "\n" + fmt_array(name, arr, fw, fh) + "\n"
         fname = os.path.join(sprites_dir, f"{base}.h")
         with open(fname, "w") as f:
             f.write(block)
@@ -579,21 +1013,36 @@ def main():
 
         # Variante 4-gray (2bpp): mesmo resize/recorte, silhueta + sombras
         gray_block = "// Gerado por tools/rebuild_sprites.py (variante 4-gray, 2 bits/pixel)\n"
-        gray_block += (f"#define {prefix}_GRAY_W {size[0]}\n"
-                       f"#define {prefix}_GRAY_H {size[1]}\n")
+        gray_block += (f"#define {prefix}_GRAY_W {fw}\n"
+                       f"#define {prefix}_GRAY_H {fh}\n")
         if base in pngs:
             img = Image.open(pngs[base])
-            img = crop_content(img, CROP.get(base, 1.0))
+            if base in BODY_H:
+                img = fit_body(remove_bg(img), BODY_H[base])
+                gfw, gh = img.size
+            else:
+                img = crop_content(img, CROP.get(base, 1.0))
+                gfw, gh = size
             mode = GRAY_MODES.get(base, DEFAULT_GRAY_MODE)
+            overlay_img = None
+            if len(mode) > 9 and mode[9]:
+                # Composicao line-art: 1bpp (contorno/bordas/sombreamento)
+                # por cima do tom 4-gray.
+                overlay_img = fit_body(remove_bg(Image.open(pngs[base])),
+                                       BODY_H[base], resample=Image.BOX)
             for name, arr in arrays[base]:
                 gname = name.replace(f"{prefix}_", f"{prefix}_GRAY_")
-                gray_block += "\n" + fmt_array(gname, to_c_array_2bpp(img, *size, mode,
-                                              base in BOTTOM_ALIGN), *size) + "\n"
+                garr = to_c_array_2bpp(img, gfw, gh, mode,
+                                       base in BOTTOM_ALIGN)
+                if overlay_img is not None:
+                    garr = overlay_2bpp(garr, pokemon_1bpp(overlay_img, gfw, gh),
+                                        gfw, gh)
+                gray_block += "\n" + fmt_array(gname, garr, gfw, gh) + "\n"
         elif old:
             fname_old = f"{prefix}_IDLE"
             arr = parse_array(old, fname_old)
             img = array_to_img(arr, 32, 32)
-            gray_block += "\n" + fmt_array(f"{prefix}_GRAY_IDLE", to_c_array_2bpp(img, *size), *size) + "\n"
+            gray_block += "\n" + fmt_array(f"{prefix}_GRAY_IDLE", to_c_array_2bpp(img, fw, fh), fw, fh) + "\n"
             for name, _ in arrays[base]:
                 if name != f"{prefix}_IDLE":
                     gray_block += f"\n#define {name.replace(f'{prefix}_', f'{prefix}_GRAY_')} {prefix}_GRAY_IDLE\n"
@@ -629,6 +1078,32 @@ def main():
         with open(gfname, "w") as f:
             f.write(gray_block)
         gray_includes.append(f'#include "sprites_gray/{base}.h"')
+
+    # 3c) Pre-visualizacoes (1bpp + 4-gray) p/ comparar com os PNGs
+    # originais antes de gravar no ESP32. So para os sprites com
+    # pipeline especifico.
+    prev_dir = os.path.join(script_dir, "previews")
+    os.makedirs(prev_dir, exist_ok=True)
+    for base in ("tangela", "tangrowth"):
+        if base not in pngs:
+            continue
+        img = fit_body(remove_bg(Image.open(pngs[base])), BODY_H[base])
+        fw, fh = img.size
+        if base in ("tangela", "tangrowth"):
+            img_box = fit_body(remove_bg(Image.open(pngs[base])), BODY_H[base],
+                               resample=Image.BOX)
+            write_preview(os.path.join(prev_dir, f"{base}_1bpp.png"),
+                          pokemon_1bpp(img_box, fw, fh))
+        mode = GRAY_MODES.get(base, DEFAULT_GRAY_MODE)
+        gray_arr = to_c_array_2bpp(img, fw, fh, mode, base in BOTTOM_ALIGN)
+        if len(mode) > 9 and mode[9]:
+            gray_arr = overlay_2bpp(gray_arr, pokemon_1bpp(img_box, fw, fh),
+                                    fw, fh)
+        write_preview(os.path.join(prev_dir, f"{base}_gray.png"),
+                      gray_array_to_img(gray_arr, fw, fh))
+        write_preview(os.path.join(prev_dir, f"{base}_orig.png"),
+                      img, scale=2)
+        print(f"[preview] tools/previews/{base}_*.png ({fw}x{fh})")
 
     # 4) Sprites.h: guard + includes + aliases + icones
     header = f"""#ifndef SPRITES_H
