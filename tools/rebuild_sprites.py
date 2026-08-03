@@ -63,7 +63,7 @@ CROP = {"scizor": 0.92}
 BODY_H = {
     "elekid": 96, "electabuzz": 144, "electivire": 160,
     "magby": 96, "magmar": 144, "magmortar": 160,
-    "rhyhorn": 160, "rhydon": 160, "rhyperior": 176,
+    "rhyhorn": 116, "rhydon": 160, "rhyperior": 176,
     "onix": 160, "steelix": 160, "megasteelix": 176,
     "tangela": 160, "tangrowth": 160,
 }

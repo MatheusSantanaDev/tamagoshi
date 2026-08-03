@@ -555,7 +555,7 @@ void Pokemon::clampStats() {
 }
 
 const char* Pokemon::getStageName() const {
-    if (_stage >= STAGE_EGG && _stage <= STAGE_MEGARAICHUY) {
+    if (_stage >= STAGE_EGG && _stage <= STAGE_TANGROWTH) {
         return STAGE_NAMES[_stage];
     }
     return "???";
