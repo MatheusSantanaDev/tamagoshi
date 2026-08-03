@@ -73,6 +73,10 @@ BODY_H = {
 # na BASE mantem o pe alinhado com as demais sprites da linha.
 BOTTOM_ALIGN = {"pikachu", "raichu", "megaraichux", "megaraichuy"}
 
+# Gray dessas sprites usa resample BOX (mesmo dos previews de comparacao)
+# em vez do LANCZOS padrao - o antialiasing muda os percentis de tom.
+GRAY_BOX_FIT = {"magmortar"}
+
 # Limiar adaptativo (Sauvola): sombra/gradiente suave vira branco,
 # contornos e detalhes nítidos ficam preto. r = janela, k = sensibilidade.
 SAUVOLA_R = 15
@@ -221,8 +225,11 @@ def pokemon_1bpp(img, w, h, dark_lum=65, edge_thr=120, blue_d=20, feet_r=140):
     return out
 
 def gray_array_to_img(bytes_, w, h):
-    """2bpp -> imagem RGB (0=preto, 1=cinza escuro, 2=cinza claro, 3=br.)"""
-    lut = [(0, 0, 0), (85, 85, 85), (170, 170, 170), (255, 255, 255)]
+    """2bpp -> imagem RGB (0=preto, 1=cinza escuro, 2=cinza claro, 3=br.)
+    LUT segue o painel SSD1681: ele renderiza v1 CLARO e v2 ESCURO
+    (invertido do conceito v0<v1<v2<v3) - preview mostra o que o display
+    mostra, nao o que o dado "conceitualmente" representa."""
+    lut = [(0, 0, 0), (170, 170, 170), (85, 85, 85), (255, 255, 255)]
     img = Image.new("RGB", (w, h))
     px = img.load()
     byte_width = (w + 3) // 4
@@ -345,13 +352,14 @@ GRAY_MODES = {
     # Aprovados com tone semantico (tons por percentil + boost + overlay):
     # steelix, rhyhorn, onix, electivire. Juncao (tons novos + proprio 1bpp
     # sauvola por cima): elekid, electabuzz, magby, magmar, megasteelix,
-    # rhydon. Antigo ("lum"): rhyperior, magmortar.
+    # rhydon. Antigo ("lum"): rhyperior. Magmortar: tone_red (vermelho
+    # escuro separado do amarelo claro - bimodal) + juncao.
     "elekid": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
     "electabuzz": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
     "electivire": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0),
     "magby": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
     "magmar": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
-    "magmortar": ("lum", 245, 205, True),
+    "magmortar": ("tone_red", 200, 150, 55, True, True, True, 0, 2, True, 0, 170, 90, "own", 25),
     "rhyhorn": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0),
     "rhydon": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
     "rhyperior": ("lum", 180, 110),
@@ -403,6 +411,27 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
         # overlay_src: "semantic" (pokemon_1bpp: anel+edges) ou "own"
         # (o proprio 1bpp sauvola do sprite - detalhes/contornos antigos).
         overlay_src = mode[11] if len(mode) > 11 else "semantic"
+    elif mode_name == "tone_red":
+        # Como "tone" semantic, mas para artes bimodais vermelho+amarelo
+        # (ex.: magmortar): os percentis sao calculados SO no corpo nao
+        # vermelho, e o vermelho saturado mapeia escuro (nunca branco).
+        # red_w: vermelho v2; red_d: vermelho preto. boost nos vermelhos
+        # nunca passa de v2 (vermelho nao vira branco).
+        wthr, gthr, blk = mode[1], mode[2], mode[3]
+        clean_bg = mode[4] if len(mode) > 4 else True
+        outline = mode[5] if len(mode) > 5 else False
+        semantic = True
+        boost = mode[7] if len(mode) > 7 else 0
+        boost_cap = mode[8] if len(mode) > 8 else 3
+        overlay = mode[9] if len(mode) > 9 else False
+        mask_lum = mode[10] if len(mode) > 10 else 0
+        red_w = mode[11] if len(mode) > 11 else 170
+        red_d = mode[12] if len(mode) > 12 else 90
+        overlay_src = mode[13] if len(mode) > 13 else "semantic"
+        # dither (% 0-50): escurece o cinza escuro pintando uma fracao dos
+        # pixels dele de preto em padrao fino (painel so tem 4 níveis; nao
+        # existe cinza mais escuro que o OTP).
+        dither = mode[14] if len(mode) > 14 else 0
     else:
         wthr, gthr = mode[1], mode[2]
         clean_bg = mode[3] if len(mode) > 3 else False
@@ -560,7 +589,7 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
             canvas.paste(rgb, ((w - rgb.width) // 2, (h - rgb.height) // 2))
         lum = canvas.convert("L")
         pt = lum.load()
-        if mode_name == "tone" and semantic:
+        if mode_name in ("tone", "tone_red") and semantic:
             # mask_lum explicito (modo[10]) ou adaptativo: p85 da
             # luminancia nao-branca (cobre o corpo inteiro, inclusive
             # sombras neutras que nao sao azuis/vermelhas). 0 = adaptativo.
@@ -575,10 +604,14 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
                 else:
                     ml = 95
             mt = semantic_mask(canvas, lum, w, h, mask_lum=ml).load()
+            if mode_name == "tone_red":
+                # Marca o vermelho saturado no canvas (rpx) para mapear
+                # separado do amarelo: percentis SO no nao-vermelho.
+                rpx = rgb.load()
         else:
             mask = sauvola(lum)
             mt = mask.load()
-        if mode_name == "tone" and outline:
+        if mode_name in ("tone", "tone_red") and outline:
             # contorno 1px preto: silhueta vizinha(4) ao que NAO e pokemon.
             ring = Image.new("L", (w, h), 255)
             rx = ring.load()
@@ -625,7 +658,31 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
                             (yy > 0 and outside[yy - 1][xx]) or
                             (yy < h - 1 and outside[yy + 1][xx])):
                             rx[xx, yy] = 0
-        if mode_name == "tone" and semantic:
+        if mode_name == "tone_red":
+            # Percentis do corpo NAO-vermelho: o amarelo sozinho define os
+            # 4 tons; o vermelho e tratado a parte (regra propria abaixo).
+            hist = [0] * 256
+            for yy in range(h):
+                for xx in range(w):
+                    if mt[xx, yy] == 0:
+                        rr, gg, bb = rpx[xx, yy]
+                        if rr > gg + 40 and rr > bb + 40:
+                            continue
+                        hist[pt[xx, yy]] += 1
+            total = sum(hist) or 1
+
+            def pct(p):
+                acc = 0
+                for L in range(256):
+                    acc += hist[L]
+                    if acc >= total * p / 100:
+                        return L
+                return 255
+
+            t0 = min(pct(15), 70)
+            t1 = max(pct(45), t0 + 15)
+            t2 = max(pct(80), t1 + 30)
+        elif mode_name == "tone" and semantic:
             # Limiares ADAPTATIVOS por percentil da arte (so a silhueta):
             # distribui a arte nos 4 tons preservando a hierarquia original
             # (sombra < corpo < destaque). p15 -> v0/v1, p45 -> v1/v2,
@@ -654,11 +711,24 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
         byte = 0
         for x in range(w):
             old = pt[x, y]
-            if mode_name == "tone":
+            if mode_name == "tone" or mode_name == "tone_red":
                 if outline and rx[x, y] == 0:
                     v = 0
                 elif mt[x, y] == 0 or not clean_bg:
-                    if semantic:
+                    if mode_name == "tone_red":
+                        rr, gg, bb = rpx[x, y]
+                        if rr > gg + 40 and rr > bb + 40:
+                            # Vermelho: escuro, nunca branco (magmortar:
+                            # cabeca/bracos/pernas vermelhos vs corpo
+                            # amarelo/creme claro).
+                            v = 0 if old < red_d else (1 if old < red_w else 2)
+                            if boost:
+                                v = min(2, v + boost)
+                        else:
+                            v = 3 if old >= t2 else 2 if old >= t1 else (1 if old >= t0 else 0)
+                            if boost:
+                                v = min(boost_cap, v + boost)
+                    elif semantic:
                         v = 3 if old >= t2 else 2 if old >= t1 else (1 if old >= t0 else 0)
                         if boost:
                             v = min(boost_cap, v + boost)
@@ -672,6 +742,20 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
                 v = 3
             else:
                 v = 3 if old >= wthr else 2 if old >= gthr else 1
+            if mode_name == "tone_red":
+                # Painel SSD1681 renderiza v1 CLARO e v2 ESCURO (LUT do
+                # fabricante invertida do conceito v0<v1<v2<v3). Troca 1<->2
+                # no dado final: o "escuro" do mapeamento (v1) vira o nivel
+                # que o painel mostra escuro (v2), e vice-versa.
+                if v == 1:
+                    # dither: fracao dos pixels do tom escuro vira preto em
+                    # padrao fino (2x2) - cinza percebido mais escuro.
+                    if dither and ((x & 1) * 2 + (y & 1)) < 4 * dither // 100:
+                        v = 0
+                    else:
+                        v = 2
+                elif v == 2:
+                    v = 1
             byte = (byte << 2) | v
             if x % 4 == 3:
                 out.append(byte)
@@ -1049,12 +1133,26 @@ def main():
                 # sombreamento) por cima do tom 4-gray.
                 overlay_img = fit_body(remove_bg(Image.open(pngs[base])),
                                        BODY_H[base], resample=Image.BOX)
+            # overlay_src: "semantic" (pokemon_1bpp) ou "own" (1bpp sauvola
+            # do sprite). Index difere entre "tone" (11) e "tone_red" (13).
+            overlay_src = "semantic"
+            if len(mode) > 11:
+                overlay_src = mode[13] if mode[0] == "tone_red" else mode[11]
+            # Base do gray: LANCZOS (padrao validado no display). Sprites em
+            # GRAY_BOX_FIT usam BOX - mesmo resample dos previews de
+            # comparacao (ex.: magmortar aprovado pela variante BOX; o
+            # antialiasing muda os percentis e os tons caem em lugares
+            # diferentes do LANCZOS).
+            gray_img = img
+            if base in GRAY_BOX_FIT:
+                gray_img = fit_body(remove_bg(Image.open(pngs[base])),
+                                    BODY_H[base], resample=Image.BOX)
             for name, arr in arrays[base]:
                 gname = name.replace(f"{prefix}_", f"{prefix}_GRAY_")
-                garr = to_c_array_2bpp(img, gfw, gh, mode,
+                garr = to_c_array_2bpp(gray_img, gfw, gh, mode,
                                        base in BOTTOM_ALIGN)
                 if overlay_img is not None:
-                    if len(mode) > 11 and mode[11] == "own":
+                    if overlay_src == "own":
                         # Juncao: tons novos + marcacao do proprio 1bpp
                         # sauvola do sprite (detalhes/contornos antigos).
                         own = to_c_array(overlay_img, gfw, gh)
