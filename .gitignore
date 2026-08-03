@@ -9,3 +9,7 @@ src/config.h
 
 # PNGs de origem das sprites - so os headers gerados sao versionados
 tools/sprites/
+
+# Previews de comparacao - apenas para validacao local
+# (nunca versionar: giram a cada iteracao)
+tools/previews/

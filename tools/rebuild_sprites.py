@@ -342,20 +342,24 @@ GRAY_MODES = {
     # Novos: limiares "lum" derivados da distribuicao de luminancia do
     # corpo (p90 ~ wthr, p50 ~ gthr). Ajuste visual se algum estagio ficar
     # chapado ou borrado - mesmo processo dos originais.
-    "elekid": ("lum", 210, 150, True),
-    "electabuzz": ("lum", 225, 160, True),
-    "electivire": ("lum", 245, 210, True),
-    "magby": ("lum", 210, 130, True),
-    "magmar": ("lum", 245, 200, True),
+    # Aprovados com tone semantico (tons por percentil + boost + overlay):
+    # steelix, rhyhorn, onix, electivire. Juncao (tons novos + proprio 1bpp
+    # sauvola por cima): elekid, electabuzz, magby, magmar, megasteelix,
+    # rhydon. Antigo ("lum"): rhyperior, magmortar.
+    "elekid": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
+    "electabuzz": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
+    "electivire": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0),
+    "magby": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
+    "magmar": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
     "magmortar": ("lum", 245, 205, True),
-    "rhyhorn": ("lum", 200, 140, True),
-    "rhydon": ("lum", 215, 140, True),
+    "rhyhorn": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0),
+    "rhydon": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
     "rhyperior": ("lum", 180, 110),
-    "onix": ("lum", 240, 140, True),
-    "steelix": ("lum", 230, 140, True),
-    "megasteelix": ("lum", 230, 140, True),
-    "tangela": ("tone", 200, 150, 55, True, True, True, 1, 2, True),
-    "tangrowth": ("tone", 200, 145, 55, True, True, True, 1, 2, True),
+    "onix": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0),
+    "steelix": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0),
+    "megasteelix": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 0, "own"),
+    "tangela": ("tone", 200, 150, 55, True, True, True, 1, 2, True, 95),
+    "tangrowth": ("tone", 200, 145, 55, True, True, True, 1, 2, True, 95),
 }
 DEFAULT_GRAY_MODE = ("lum", 200, 120)
 
@@ -395,6 +399,10 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
         boost = mode[7] if len(mode) > 7 else 0
         boost_cap = mode[8] if len(mode) > 8 else 3
         overlay = mode[9] if len(mode) > 9 else False
+        mask_lum = mode[10] if len(mode) > 10 else 0
+        # overlay_src: "semantic" (pokemon_1bpp: anel+edges) ou "own"
+        # (o proprio 1bpp sauvola do sprite - detalhes/contornos antigos).
+        overlay_src = mode[11] if len(mode) > 11 else "semantic"
     else:
         wthr, gthr = mode[1], mode[2]
         clean_bg = mode[3] if len(mode) > 3 else False
@@ -551,10 +559,22 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
         else:
             canvas.paste(rgb, ((w - rgb.width) // 2, (h - rgb.height) // 2))
         lum = canvas.convert("L")
+        pt = lum.load()
         if mode_name == "tone" and semantic:
-            # mask_lum 95: sombras neutras (L 65-95, nao azuis/vermelhas)
-            # entram na silhueta e viram cinza escuro em vez de branco.
-            mt = semantic_mask(canvas, lum, w, h, mask_lum=95).load()
+            # mask_lum explicito (modo[10]) ou adaptativo: p85 da
+            # luminancia nao-branca (cobre o corpo inteiro, inclusive
+            # sombras neutras que nao sao azuis/vermelhas). 0 = adaptativo.
+            if mask_lum:
+                ml = mask_lum
+            else:
+                vals = [pt[x, y] for y in range(h) for x in range(w)
+                        if pt[x, y] < 245]
+                if vals:
+                    sv = sorted(vals)
+                    ml = max(95, sv[int(len(sv) * 0.85)])
+                else:
+                    ml = 95
+            mt = semantic_mask(canvas, lum, w, h, mask_lum=ml).load()
         else:
             mask = sauvola(lum)
             mt = mask.load()
@@ -605,7 +625,6 @@ def to_c_array_2bpp(img, w, h, mode=None, bottom_align=False):
                             (yy > 0 and outside[yy - 1][xx]) or
                             (yy < h - 1 and outside[yy + 1][xx])):
                             rx[xx, yy] = 0
-        pt = lum.load()
         if mode_name == "tone" and semantic:
             # Limiares ADAPTATIVOS por percentil da arte (so a silhueta):
             # distribui a arte nos 4 tons preservando a hierarquia original
@@ -1026,8 +1045,8 @@ def main():
             mode = GRAY_MODES.get(base, DEFAULT_GRAY_MODE)
             overlay_img = None
             if len(mode) > 9 and mode[9]:
-                # Composicao line-art: 1bpp (contorno/bordas/sombreamento)
-                # por cima do tom 4-gray.
+                # Composicao line-art: traco 1bpp (contorno/bordas/
+                # sombreamento) por cima do tom 4-gray.
                 overlay_img = fit_body(remove_bg(Image.open(pngs[base])),
                                        BODY_H[base], resample=Image.BOX)
             for name, arr in arrays[base]:
@@ -1035,8 +1054,16 @@ def main():
                 garr = to_c_array_2bpp(img, gfw, gh, mode,
                                        base in BOTTOM_ALIGN)
                 if overlay_img is not None:
-                    garr = overlay_2bpp(garr, pokemon_1bpp(overlay_img, gfw, gh),
-                                        gfw, gh)
+                    if len(mode) > 11 and mode[11] == "own":
+                        # Juncao: tons novos + marcacao do proprio 1bpp
+                        # sauvola do sprite (detalhes/contornos antigos).
+                        own = to_c_array(overlay_img, gfw, gh)
+                        garr = overlay_2bpp(garr, array_to_img(own, gfw, gh),
+                                            gfw, gh)
+                    else:
+                        garr = overlay_2bpp(garr,
+                                            pokemon_1bpp(overlay_img, gfw, gh),
+                                            gfw, gh)
                 gray_block += "\n" + fmt_array(gname, garr, gfw, gh) + "\n"
         elif old:
             fname_old = f"{prefix}_IDLE"
