@@ -41,21 +41,20 @@
 
 // Novos stats (0-100)
 #define ENERGY_DECAY      1   // Energia cai 1/min (sobe dormindo)
-#define SLEEP_DECAY       1   // Sono cai 1/min (sobe dormindo)
 #define HYGIENE_DECAY     1   // Higiene cai 1/min
 #define DIRT_ACCUM_PER_MIN 1  // Coco acumula 1/min (e mais ao alimentar)
 
 // Custo/efeitos das acoes
-#define PLAY_ENERGY_COST  10  // Brincar gasta energia
 #define DIRT_PER_FEED     15  // Cada alimentacao gera coco
 
-// Recuperacao dormindo (por minuto)
+// Recuperacao dormindo (por minuto): recupera SO energia. Dormir custa
+// fome (1.8x) e felicidade (0.5x) por cada ponto de energia recuperado.
 #define SLEEP_RECOVERY_ENERGY 15
-#define SLEEP_RECOVERY_SLEEP  20
+#define SLEEP_HUNGER_FACTOR 18  // (per 10) fome -1.8 por energia recuperada
+#define SLEEP_HAPPY_FACTOR  5   // (per 10) felicidade -0.5 por energia recuperada
 
 // Limiares criticos
 #define ENERGY_CRITICAL   15  // Abaixo disso, felicidade cai mais rapido
-#define SLEEP_CRITICAL    15  // Abaixo disso, felicidade cai mais rapido
 #define HYGIENE_CRITICAL  15  // Abaixo disso, saude cai
 #define DIRT_CRITICAL     60  // Acima disso, saude cai
 
@@ -91,7 +90,6 @@ static const int CLASS_TIMES_MIN[] = {
 #define MEGA_REQ_HAPPINESS 85
 #define MEGA_REQ_HEALTH    85
 #define MEGA_REQ_HYGIENE   80
-#define MEGA_REQ_SLEEP     70
 // "Poucos periodos criticos": maximo de minutos em estado critico
 // acumulados no estagio (reseta a cada entrada em Mega)
 #define MEGA_REQ_MAX_CRITICAL_MIN 90
@@ -120,8 +118,7 @@ static const int CLASS_TIMES_MIN[] = {
 // ============================================================
 #define MOOD_HEALTH_LOW   20  // Saude baixa     -> Doente
 #define MOOD_HUNGER_LOW   15  // Fome muito alta -> Faminto
-#define MOOD_ENERGY_LOW   20  // Energia baixa + sono baixo -> Cansado
-#define MOOD_SLEEP_LOW    20
+#define MOOD_ENERGY_LOW   20  // Energia baixa -> Cansado
 #define MOOD_HYGIENE_LOW  20  // Higiene baixa   -> Irritado
 #define MOOD_HAPPY_LOW    35  // Felicidade baixa + fome alta -> Triste
 #define MOOD_HUNGER_MID   35
@@ -151,40 +148,35 @@ struct PersonalitySpec {
     int hungerMult;      // Decaimento da fome (%)
     int happyMult;       // Decaimento da felicidade (%)
     int energyMult;      // Decaimento da energia (%)
-    int sleepMult;       // Decaimento do sono (%)
     int hygieneMult;     // Decaimento da higiene (%)
     int healthMult;      // Decaimento da saude quando critico (%)
-    int feedHappyMult;   // Felicidade ganha ao comer (%)
     int playHappyMult;   // Felicidade ganha ao brincar (%)
-    int playEnergyMult;  // Energia gasta ao brincar (%)
-    int sleepRecMult;    // Recuperacao dormindo (%)
+    int sleepRecMult;    // Energia recuperada dormindo (%)
 };
 
 static const PersonalitySpec PERSONALITIES[P_COUNT] = {
-    // nome         fome fel ener sono higi saude comer brinc custo sono
-    { "Guloso",      115, 100, 100, 100, 100, 100, 150, 100, 100, 100 },
-    { "Preguicoso",  100, 100,  85, 100, 100, 100, 100,  75, 100, 100 },
-    { "Brincalhao",  100, 100, 100, 100, 100, 100, 100, 150, 115, 100 },
-    { "Agitado",     100, 120, 115, 100, 100, 100, 100, 100, 100, 100 },
-    { "Carinhoso",   100,  80, 100, 100, 100,  75, 100, 100, 100, 100 },
-    { "Teimoso",      85, 100, 100, 100, 100, 100, 100,  75, 100, 100 },
-    { "Dorminhoco",  100, 100, 100, 120, 100, 100, 100, 100, 100, 125 },
-    { "Resistente",  100, 100, 100, 100, 100,  75, 100, 100, 100, 100 },
-    { "Fragil",      100, 110, 100, 100, 100, 125, 100, 100, 100, 100 },
+    // nome         fome fel ener higi saude brinc sono
+    { "Guloso",      115, 100, 100, 100, 100, 100, 100 },
+    { "Preguicoso",  100, 100,  85, 100, 100, 100,  75 },
+    { "Brincalhao",  100, 100, 100, 100, 100, 100, 150 },
+    { "Agitado",     100, 120, 115, 100, 100, 100, 100 },
+    { "Carinhoso",   100,  80, 100, 100, 100,  75, 100 },
+    { "Teimoso",      85, 100, 100, 100, 100, 100,  75 },
+    { "Dorminhoco",  100, 100, 100, 100, 100, 100, 125 },
+    { "Resistente",  100, 100, 100, 100, 100,  75, 100 },
+    { "Fragil",      100, 110, 100, 100, 100, 125, 100 },
 };
 
 // Efeitos das personalidades:
-// - Guloso:      come mais, felicidade sobe mais ao comer
+// - Guloso:      come mais
 // - Preguicoso:  energia cai mais devagar, brinca com menos animo
 // - Brincalhao:  felicidade sobe mais ao brincar (gasta mais energia)
 // - Agitado:     entedia mais facil, gasta mais energia
 // - Carinhoso:   felicidade cai devagar, saude resiste mais
 // - Teimoso:     come menos, brinca com menos animo
-// - Dorminhoco:  dorme mais (cai mais rapido e recupera mais)
+// - Dorminhoco:  recupera mais energia dormindo
 // - Resistente:  saude quase nao cai
 // - Fragil:      saude cai mais facil
-
-#define FEED_HAPPY_BASE 10  // Felicidade base ganha ao comer
 
 // ============================================================
 // EGG CONFIG

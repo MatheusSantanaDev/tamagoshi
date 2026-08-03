@@ -32,9 +32,9 @@ public:
 
     // [DEV] Modo dev (guia de testes da pagina web)
     void devSetDirt(int v);                    // sujeira direta 0..100
-    void devChangeBar(int idx, int delta);     // 0=energia, 1=sono, 2=higiene
+    void devChangeBar(int idx, int delta);     // 0=energia, 1=higiene
 
-    // [TESTE] Decai um stat por vez (energia->sono->higiene->coco) para
+    // [TESTE] Decai um stat por vez (energia->higiene->coco) para
     // verificar o refresh parcial das barras. Sem risco de morte/evolucao.
     void testCycleBars();
 
@@ -59,7 +59,6 @@ public:
     int getHealth() const { return _health; }
     int getWarmth() const { return _warmth; }
     int getEnergy() const { return _energy; }
-    int getSleep() const { return _sleep; }
     int getHygiene() const { return _hygiene; }
     int getDirt() const { return _dirt; }
     int getIncubationProgress() const { return _incubationMinutes; }
@@ -110,7 +109,6 @@ private:
     int _health;
     int _warmth;
     int _energy;
-    int _sleep;
     int _hygiene;
     int _dirt;
     int _incubationMinutes;

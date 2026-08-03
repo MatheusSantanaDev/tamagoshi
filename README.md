@@ -38,8 +38,10 @@ esperar horas (o padrão é `DEMO_MODE 0`, tempo real):
 
 Com `DEMO_MODE 0`, o jogo segue o tempo real:
 
-- **FEED** alimenta (no ovo, aquece +20 de calor)
-- **PLAY** brinca
+- **FEED** alimenta: +20 de fome (+3 de saúde se < 50); **não** dá
+  felicidade (no ovo, aquece +20 de calor)
+- **PLAY** brinca: sobe a felicidade e gasta energia **na mesma proporção**
+  (1:1, personalidade influencia o quanto ganha/gasta)
 - **STATUS** mostra a tela de stats
 - **Pressão longa PLAY** limpa os cocos | **Pressão longa STATUS** reseta
 - O tempo real vira **lvl** (idade em minutos, atualiza a cada minuto com
@@ -48,10 +50,11 @@ Com `DEMO_MODE 0`, o jogo segue o tempo real:
 ## Sono
 
 Depois de `SLEEP_AFTER_MS` (60s) sem interação, o pet **adormece**: enquanto
-dorme, recupera `SLEEP_RECOVERY_ENERGY` (15) de energia e
-`SLEEP_RECOVERY_SLEEP` (20) de sono por minuto (multiplicado pela
-personalidade), além do decaimento normal. Qualquer ação (botão ou web)
-acorda.
+dorme, recupera `SLEEP_RECOVERY_ENERGY` (15) de energia por minuto
+(multiplicado pela personalidade) — **e só energia** (sono e energia são a
+mesma coisa). Dormir tem custo: cada ponto de energia recuperado tira
+`SLEEP_HUNGER_FACTOR` (1.8) de fome e `SLEEP_HAPPY_FACTOR` (0.5) de
+felicidade. Qualquer ação (botão ou web) acorda.
 
 As telas alternam sem refresh periódico (o e-paper só redesenha na troca):
 
@@ -94,7 +97,7 @@ Tempos por classe (`CLASS_TIMES_MIN` em `src/config.h`): ovo 5 min, baby 4h,
 No estágio final (ex.: Scizor, Raichu), aos 36h, se os requisitos forem
 atendidos, o Pokémon vira Mega:
 
-- Felicidade ≥ 85, Saúde ≥ 85, Higiene ≥ 80, Sono ≥ 70
+- Felicidade ≥ 85, Saúde ≥ 85, Higiene ≥ 80
 - No máximo `MEGA_REQ_MAX_CRITICAL_MIN` (90) minutos críticos no estágio
 
 A Mega é **temporária e reversível**: dura no máximo 12h consecutivas e
@@ -107,8 +110,8 @@ do estágio final (48h, pausa durante a Mega) e o relógio acumulado de Mega
 
 Na chocagem o ovo sorteia uma **personalidade oculta** (9 tipos em
 `PERSONALITIES`), que multiplica os decaimentos e efeitos das ações
-(ex.: Guloso come mais rápido, Dorminhoco dorme melhor). Só aparece no log
-serial — o jogador descobre pelos números.
+(ex.: Guloso come mais rápido, Dorminhoco recupera mais energia dormindo).
+Só aparece no log serial — o jogador descobre pelos números.
 
 O **humor** é um campo único e priorizado (Doente > Faminto > Cansado >
 Irritado > Triste > Feliz > Neutro), calculado dos stats via limiares

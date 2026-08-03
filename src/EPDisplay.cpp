@@ -47,6 +47,13 @@ EPDisplay::EPDisplay()
 
 void EPDisplay::begin() {
     initDisplay();
+
+    // Task de display: faz os pushes lentos do painel (refreshes parciais
+    // e completos) sem bloquear o loop principal (inputs/web continuam
+    // respondendo enquanto o painel atualiza).
+    _jobSem = xSemaphoreCreateCounting(DISPLAY_JOB_MAX + 2, 0);
+    xTaskCreatePinnedToCore(displayTaskEntry, "displayTask", 4096, this, 0,
+                            &_taskHandle, 0);
 }
 
 void EPDisplay::initDisplay() {
@@ -227,14 +234,12 @@ void EPDisplay::snapshotPet(const Pokemon& pet) {
         _lastPetBars[2] = -1;
         _lastPetBars[3] = -1;
         _lastPetBars[4] = -1;
-        _lastPetBars[5] = -1;
     } else {
         _lastPetBars[0] = pet.getHappiness();
         _lastPetBars[1] = pet.getHunger();
         _lastPetBars[2] = pet.getEnergy();
         _lastPetBars[3] = pet.getHealth();
-        _lastPetBars[4] = pet.getSleep();
-        _lastPetBars[5] = pet.getHygiene();
+        _lastPetBars[4] = pet.getHygiene();
     }
 
     // Caixa exata dos digitos do "lvl N" (o prefixo "lvl " nunca muda; so
@@ -319,11 +324,10 @@ void EPDisplay::drawPet(const Pokemon& pet) {
         drawBarRow(0, "Calor", pet.getWarmth(), STATS_MAX);
     } else {
         // === MODO POKEMON NORMAL ===
-        drawBarRow(5, "Fel.", pet.getHappiness(), STATS_MAX);
-        drawBarRow(4, "Fome", pet.getHunger(), STATS_MAX);
-        drawBarRow(3, "Ener.", pet.getEnergy(), STATS_MAX);
-        drawBarRow(2, "Sau.", pet.getHealth(), STATS_MAX);
-        drawBarRow(1, "Sono", pet.getSleep(), STATS_MAX);
+        drawBarRow(4, "Fel.", pet.getHappiness(), STATS_MAX);
+        drawBarRow(3, "Fome", pet.getHunger(), STATS_MAX);
+        drawBarRow(2, "Ener.", pet.getEnergy(), STATS_MAX);
+        drawBarRow(1, "Sau.", pet.getHealth(), STATS_MAX);
         drawBarRow(0, "Hig.", pet.getHygiene(), STATS_MAX);
     }
 
@@ -339,10 +343,64 @@ void EPDisplay::pushPartialRegion(int16_t x, int16_t y, int16_t w, int16_t h) {
 #if GRAY_MODE
     _gray.clearRegion(x, y, w, h);
     _gray.overlay1bppRect(_epd->uiBuffer(), x, y, w, h);
-    _gray.pushWindow(x, y, w, h);
+    enqueueRegion(x, y, w, h);
 #else
     _epd->displayWindow(x, y, w, h);
 #endif
+}
+
+// Enfileira o refresh de uma regiao. O conteudo e lido do framebuffer no
+// momento do push, entao: (a) re-enfileirar a mesma regiao e um no-op;
+// (b) se a fila estourar, cai para um push completo (cobre tudo).
+void EPDisplay::enqueueRegion(int16_t x, int16_t y, int16_t w, int16_t h) {
+    if (_fullPending) return;
+
+    int head = _jobHead, tail = _jobTail;
+    for (int i = head; i != tail; i = (i + 1) % DISPLAY_JOB_MAX) {
+        const DisplayJob& j = _jobs[i];
+        if (j.x == x && j.y == y && j.w == w && j.h == h) return;
+    }
+    if ((tail + 1) % DISPLAY_JOB_MAX == head) {
+        enqueueFull();   // fila cheia: push completo no lugar
+        return;
+    }
+    DisplayJob& j = _jobs[tail];
+    j.x = x; j.y = y; j.w = w; j.h = h;
+    _jobTail = (tail + 1) % DISPLAY_JOB_MAX;
+    xSemaphoreGive(_jobSem);
+}
+
+void EPDisplay::enqueueFull() {
+    _fullPending = true;
+    _jobTail = _jobHead;   // descarta regioes pendentes
+    xSemaphoreGive(_jobSem);
+}
+
+void EPDisplay::displayTaskEntry(void* param) {
+    EPDisplay* d = (EPDisplay*)param;
+    for (;;) {
+        d->displayTaskLoop();
+    }
+}
+
+void EPDisplay::displayTaskLoop() {
+    if (xSemaphoreTake(_jobSem, portMAX_DELAY) != pdTRUE) return;
+    while (xSemaphoreTake(_jobSem, 0) == pdTRUE) {}   // esvazia o contador
+
+    if (_fullPending) {
+        _fullPending = false;
+        _gray.push();
+        _jobHead = _jobTail;
+        return;
+    }
+
+    // Drena a fila uma regiao por vez: cada push e uma janela pequena
+    // (flash localizado), e o loop principal nao fica bloqueado em nenhum.
+    while (_jobHead != _jobTail) {
+        DisplayJob& j = _jobs[_jobHead];
+        _jobHead = (_jobHead + 1) % DISPLAY_JOB_MAX;
+        _gray.pushWindow(j.x, j.y, j.w, j.h);
+    }
 }
 
 void EPDisplay::updateBarPartial(int row, const char* label, int value, int maxVal) {
@@ -359,7 +417,7 @@ void EPDisplay::updateBarPartial(int row, const char* label, int value, int maxV
     }
 
     // Push da barra INTEIRA (borda + interior): a area recarregada coincide
-    // exatamente com a barra.
+    // exatamente com a barra. O push roda na task de display (nao bloqueia).
     pushPartialRegion(PET_BAR_X, top, PET_BAR_W, PET_BAR_H);
     _lastPetBars[row] = value;
 }
@@ -470,7 +528,7 @@ void EPDisplay::updatePoopsPartial(const Pokemon& pet) {
     // Redesenha os cocos atuais
     drawPoops(pet);
 
-    // Push parcial de cada regiao
+    // Push parcial de cada regiao (na task de display)
     if (leftX >= 0) {
         pushPartialRegion(leftX, regY, regW, regH);
     }
@@ -481,11 +539,13 @@ void EPDisplay::updatePoopsPartial(const Pokemon& pet) {
 }
 
 void EPDisplay::drawPetUpdates(const Pokemon& pet) {
-    // Sprite mudou? -> redesenho completo. (No ovo o sprite so muda ao
-    // chocar; esquentar/esfriar so troca a frase, abaixo.)
+    // Sprite mudou (ex.: humor feliz/triste)? Nao faz redraw completo:
+    // piscaria a tela inteira a cada troca de humor (alimentar/brincar
+    // cruzam o limiar de felicidade 50 com frequencia). O sprite so e
+    // redesenhado em redraws completos (troca de tela, sono, evolucao);
+    // aqui as barras seguem com refresh parcial localizado.
     if (pet.getCurrentSprite() != _lastPetSprite) {
-        drawPet(pet);
-        return;
+        _lastPetSprite = pet.getCurrentSprite();
     }
 
     // Frase mudou (sem mudar o sprite)? -> refresh parcial so da frase
@@ -506,21 +566,18 @@ void EPDisplay::drawPetUpdates(const Pokemon& pet) {
         }
     } else {
         if (pet.getHappiness() != _lastPetBars[0]) {
-            updateBarPartial(5, "Fel.", pet.getHappiness(), STATS_MAX);
+            updateBarPartial(4, "Fel.", pet.getHappiness(), STATS_MAX);
         }
         if (pet.getHunger() != _lastPetBars[1]) {
-            updateBarPartial(4, "Fome", pet.getHunger(), STATS_MAX);
+            updateBarPartial(3, "Fome", pet.getHunger(), STATS_MAX);
         }
         if (pet.getEnergy() != _lastPetBars[2]) {
-            updateBarPartial(3, "Ener.", pet.getEnergy(), STATS_MAX);
+            updateBarPartial(2, "Ener.", pet.getEnergy(), STATS_MAX);
         }
         if (pet.getHealth() != _lastPetBars[3]) {
-            updateBarPartial(2, "Sau.", pet.getHealth(), STATS_MAX);
+            updateBarPartial(1, "Sau.", pet.getHealth(), STATS_MAX);
         }
-        if (pet.getSleep() != _lastPetBars[4]) {
-            updateBarPartial(1, "Sono", pet.getSleep(), STATS_MAX);
-        }
-        if (pet.getHygiene() != _lastPetBars[5]) {
+        if (pet.getHygiene() != _lastPetBars[4]) {
             updateBarPartial(0, "Hig.", pet.getHygiene(), STATS_MAX);
         }
     }
@@ -853,7 +910,7 @@ void EPDisplay::refresh() {
         _gray.overlay1bppRect(_epd->uiBuffer(), _zzzX, _zzzY, _zzzW, _zzzH);
         _zzzW = 0;
     }
-    _gray.push();
+    enqueueFull();
 #else
     _epd->display();
 #endif

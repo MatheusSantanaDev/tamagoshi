@@ -1,4 +1,5 @@
 #include "EPGray.h"
+#include <esp_task_wdt.h>
 
 void EPGray::sendCmd(uint8_t c) {
     SPI.beginTransaction(SPISettings(10000000, MSBFIRST, SPI_MODE0));
@@ -26,6 +27,10 @@ void EPGray::sendData(const uint8_t* d, size_t n) {
 bool EPGray::waitBusy(const char* step) {
     uint32_t start = millis();
     while (digitalRead(GRAY_EP_BUSY) == LOW) {   // busy = LOW (igual GxEPD2)
+        // Refreshes do painel 4-gray passam de 5s (limite do watchdog do
+        // loop): alimenta o watchdog para o refresh lento nunca virar um
+        // reset (que gerava boot-loop e travava os inputs).
+        esp_task_wdt_reset();
         if (millis() - start > 10000) {
             Serial.printf("EPGray: busy timeout (%s)\n", step);
             return false;

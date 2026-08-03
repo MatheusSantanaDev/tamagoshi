@@ -13,3 +13,6 @@ tools/sprites/
 # Previews de comparacao - apenas para validacao local
 # (nunca versionar: giram a cada iteracao)
 tools/previews/
+
+# Python
+__pycache__/

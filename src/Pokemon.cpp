@@ -6,9 +6,13 @@
 #include <nvs_flash.h>
 #include <nvs.h>
 
+// Forma Mega (relogio acumulado de vida proprio)
+static bool isMegaStage(PokemonStage s);
+
+
 Pokemon::Pokemon()
     : _stage(STAGE_EGG), _hunger(80), _happiness(70),
-      _health(100), _warmth(100), _energy(100), _sleep(100),
+      _health(100), _warmth(100), _energy(100),
       _hygiene(100), _dirt(0), _incubationMinutes(0),
       _incubationFraction(0.0f), _ageMinutes(0),
       _isAlive(true), _minutesAtCurrentStage(0),
@@ -35,7 +39,6 @@ void Pokemon::resetEgg() {
     _happiness = 70;
     _health = 100;
     _energy = 100;
-    _sleep = 100;
     _hygiene = 100;
     _dirt = 0;
     _ageMinutes = 0;
@@ -58,18 +61,14 @@ void Pokemon::feed() {
         return;
     }
 
-    _hunger = min(_hunger + FEED_AMOUNT, STATS_MAX);
+    int gain = isMegaStage(_stage) ? MEGA_GAIN_MULT : 100;
+    _hunger = min(_hunger + (FEED_AMOUNT * gain) / 100, STATS_MAX);
     if (_health < 50) {
         _health = min(_health + 3, STATS_MAX);
     }
 
     // Comer gera coco
     _dirt = min(_dirt + DIRT_PER_FEED, STATS_MAX);
-
-    // Comer tambem alegra (Guloso fica muito feliz)
-    _happiness = min(_happiness +
-                     (FEED_HAPPY_BASE * PERSONALITIES[_personality].feedHappyMult) / 100,
-                     STATS_MAX);
 }
 
 void Pokemon::play() {
@@ -81,16 +80,15 @@ void Pokemon::play() {
         return;
     }
 
-    _happiness = min(_happiness +
-                     (PLAY_AMOUNT * PERSONALITIES[_personality].playHappyMult) / 100,
-                     STATS_MAX);
+    int gain = isMegaStage(_stage) ? MEGA_GAIN_MULT : 100;
+    int happyGain = (PLAY_AMOUNT * PERSONALITIES[_personality].playHappyMult * gain) / 10000;
+    _happiness = min(_happiness + happyGain, STATS_MAX);
     if (_health < 50) {
         _health = min(_health + 2, STATS_MAX);
     }
 
-    // Brincar gasta energia (personalidade influencia o esforco)
-    _energy = max(_energy - (PLAY_ENERGY_COST * PERSONALITIES[_personality].playEnergyMult) / 100,
-                  STATS_MIN);
+    // Brincar gasta energia na mesma proporcao da felicidade ganha
+    _energy = max(_energy - happyGain, STATS_MIN);
 }
 
 void Pokemon::clean() {
@@ -112,7 +110,6 @@ void Pokemon::forceStage(PokemonStage stage) {
     _health = 100;
     _warmth = 100;
     _energy = 100;
-    _sleep = 100;
     _hygiene = 100;
     _dirt = 0;
     _incubationMinutes = 0;
@@ -125,8 +122,8 @@ void Pokemon::forceStage(PokemonStage stage) {
     _megaContinuousMinutes = 0;
 }
 
-// [TESTE] Decai um stat por vez, reciclando ao zerar. So mexe nos 4 stats
-// das barras novas (energia/sono/higiene/coco) - felicidade e saude ficam
+// [TESTE] Decai um stat por vez, reciclando ao zerar. So mexe nos 3 stats
+// das barras novas (energia/higiene/coco) - felicidade e saude ficam
 // intactos, entao o sprite e a mensagem nao mudam e qualquer flash de tela
 // inteira fica visivel.
 void Pokemon::testCycleBars() {
@@ -139,11 +136,7 @@ void Pokemon::testCycleBars() {
             else _energy = max(_energy - STEP, STATS_MIN);
             break;
         case 1:
-            if (_sleep <= 0) { _sleep = STATS_MAX; idx = 2; }
-            else _sleep = max(_sleep - STEP, STATS_MIN);
-            break;
-        case 2:
-            if (_hygiene <= 0) { _hygiene = STATS_MAX; idx = 3; }
+            if (_hygiene <= 0) { _hygiene = STATS_MAX; idx = 2; }
             else _hygiene = max(_hygiene - STEP, STATS_MIN);
             break;
         default:
@@ -158,9 +151,9 @@ void Pokemon::devSetDirt(int v) {
     _dirt = constrain(v, STATS_MIN, STATS_MAX);
 }
 
-// [DEV] Ajusta uma barra direto: 0=energia, 1=sono, 2=higiene
+// [DEV] Ajusta uma barra direto: 0=energia, 1=higiene
 void Pokemon::devChangeBar(int idx, int delta) {
-    int* stat = (idx == 0) ? &_energy : (idx == 1) ? &_sleep : &_hygiene;
+    int* stat = (idx == 0) ? &_energy : &_hygiene;
     *stat = constrain(*stat + delta, STATS_MIN, STATS_MAX);
 }
 
@@ -177,19 +170,24 @@ void Pokemon::update(unsigned long deltaMs) {
     }
 }
 
-// Recupera energia/sono enquanto o ESP32 esta em modo dormir
+// Recupera energia enquanto o ESP32 esta em modo dormir. Dormir custa
+// fome (1.8x) e felicidade (0.5x) por cada ponto de energia recuperado.
 void Pokemon::sleepRecovery(unsigned long deltaMs) {
     if (!_isAlive) return;
 
     static unsigned long accumulated = 0;
     accumulated += deltaMs;
 
+    int gain = isMegaStage(_stage) ? MEGA_GAIN_MULT : 100;
+
     const unsigned long ONE_MINUTE = 60000;
     while (accumulated >= ONE_MINUTE) {
         accumulated -= ONE_MINUTE;
         const PersonalitySpec& p = PERSONALITIES[_personality];
-        _energy = min(_energy + (SLEEP_RECOVERY_ENERGY * p.sleepRecMult) / 100, STATS_MAX);
-        _sleep = min(_sleep + (SLEEP_RECOVERY_SLEEP * p.sleepRecMult) / 100, STATS_MAX);
+        int rec = (SLEEP_RECOVERY_ENERGY * p.sleepRecMult * gain) / 10000;
+        _energy = min(_energy + rec, STATS_MAX);
+        _hunger = max(_hunger - (rec * SLEEP_HUNGER_FACTOR) / 10, STATS_MIN);
+        _happiness = max(_happiness - (rec * SLEEP_HAPPY_FACTOR) / 10, STATS_MIN);
     }
 }
 
@@ -238,30 +236,38 @@ void Pokemon::tickMinute() {
     } else {
         // Comportamento normal (fora do ovo)
         const PersonalitySpec& p = PERSONALITIES[_personality];
-        _hunger = max(_hunger - (HUNGER_DECAY * p.hungerMult) / 100, STATS_MIN);
-        _happiness = max(_happiness - (HAPPY_DECAY * p.happyMult) / 100, STATS_MIN);
-        _energy = max(_energy - (ENERGY_DECAY * p.energyMult) / 100, STATS_MIN);
-        _sleep = max(_sleep - (SLEEP_DECAY * p.sleepMult) / 100, STATS_MIN);
-        _hygiene = max(_hygiene - (HYGIENE_DECAY * p.hygieneMult) / 100, STATS_MIN);
+        int loss = isMegaStage(_stage) ? MEGA_LOSS_MULT : 100;
+
+        // Fator unificado: (decay * multPersonalidade * loss) / 10000
+        int dHunger = (HUNGER_DECAY * p.hungerMult * loss) / 10000;
+        int dHappy = (HAPPY_DECAY * p.happyMult * loss) / 10000;
+        int dEnergy = (ENERGY_DECAY * p.energyMult * loss) / 10000;
+        int dHygiene = (HYGIENE_DECAY * p.hygieneMult * loss) / 10000;
+
+        _hunger = max(_hunger - dHunger, STATS_MIN);
+        _happiness = max(_happiness - dHappy, STATS_MIN);
+        _energy = max(_energy - dEnergy, STATS_MIN);
+        _hygiene = max(_hygiene - dHygiene, STATS_MIN);
         _dirt = min(_dirt + DIRT_ACCUM_PER_MIN, STATS_MAX);
 
         if (_hunger <= 0 || _happiness <= 0) {
-            _health = max(_health - (HEALTH_DECAY * p.healthMult) / 100, STATS_MIN);
+            _health = max(_health - (HEALTH_DECAY * p.healthMult * loss) / 10000, STATS_MIN);
         }
 
-        // Cansado ou com sono: felicidade cai mais rapido
-        if (_energy <= ENERGY_CRITICAL || _sleep <= SLEEP_CRITICAL) {
-            _happiness = max(_happiness - 2, STATS_MIN);
+        // Cansado: felicidade cai mais rapido
+        if (_energy <= ENERGY_CRITICAL) {
+            _happiness = max(_happiness - ((2 * loss) / 100), STATS_MIN);
         }
 
         // Sujo ou coco acumulado: saude cai
         if (_hygiene <= HYGIENE_CRITICAL || _dirt >= DIRT_CRITICAL) {
-            _health = max(_health - (2 * p.healthMult) / 100, STATS_MIN);
+            _health = max(_health - (2 * p.healthMult * loss) / 10000, STATS_MIN);
         }
 
         if (_hunger > 70 && _happiness > 70 && _health < STATS_MAX &&
-            _energy > 50 && _sleep > 50 && _hygiene > 40) {
-            _health = min(_health + 2, STATS_MAX);
+            _energy > 50 && _hygiene > 40) {
+            int gain = isMegaStage(_stage) ? MEGA_GAIN_MULT : 100;
+            _health = min(_health + (2 * gain) / 100, STATS_MAX);
         }
 
         // Periodos criticos: conta minutos em estado critico no estagio
@@ -270,7 +276,7 @@ void Pokemon::tickMinute() {
         if (!isMegaStage(_stage) &&
             (_health <= MOOD_HEALTH_LOW || _hunger <= MOOD_HUNGER_LOW ||
              _happiness <= MOOD_HAPPY_LOW ||
-             _energy <= ENERGY_CRITICAL || _sleep <= SLEEP_CRITICAL ||
+             _energy <= ENERGY_CRITICAL ||
              _hygiene <= HYGIENE_CRITICAL || _dirt >= DIRT_CRITICAL)) {
             _criticalMinutes++;
         }
@@ -423,7 +429,6 @@ bool Pokemon::megaRequirementsMet() const {
     if (_happiness < MEGA_REQ_HAPPINESS) return false;
     if (_health < MEGA_REQ_HEALTH) return false;
     if (_hygiene < MEGA_REQ_HYGIENE) return false;
-    if (_sleep < MEGA_REQ_SLEEP) return false;
     if (_criticalMinutes > MEGA_REQ_MAX_CRITICAL_MIN) return false;
     return true;
 }
@@ -502,7 +507,6 @@ void Pokemon::evolve() {
         _happiness = 70;
         _health = 100;
         _energy = 100;
-        _sleep = 100;
         _hygiene = 100;
         _dirt = 0;
         // Personalidade (oculta) sorteada na chocagem
@@ -549,7 +553,6 @@ void Pokemon::clampStats() {
     _happiness = constrain(_happiness, STATS_MIN, STATS_MAX);
     _health = constrain(_health, STATS_MIN, STATS_MAX);
     _energy = constrain(_energy, STATS_MIN, STATS_MAX);
-    _sleep = constrain(_sleep, STATS_MIN, STATS_MAX);
     _hygiene = constrain(_hygiene, STATS_MIN, STATS_MAX);
     _dirt = constrain(_dirt, STATS_MIN, STATS_MAX);
 }
@@ -809,7 +812,7 @@ const char* Pokemon::getMood() const {
     if (_stage == STAGE_EGG) return "Intrigado";
     if (_health <= MOOD_HEALTH_LOW) return "Doente";
     if (_hunger <= MOOD_HUNGER_LOW) return "Faminto";
-    if (_energy <= MOOD_ENERGY_LOW && _sleep <= MOOD_SLEEP_LOW) return "Cansado";
+    if (_energy <= MOOD_ENERGY_LOW) return "Cansado";
     if (_hygiene <= MOOD_HYGIENE_LOW) return "Irritado";
     if (_happiness <= MOOD_HAPPY_LOW && _hunger <= MOOD_HUNGER_MID) return "Triste";
     if (_happiness >= MOOD_HAPPY_HIGH && _hunger >= MOOD_HUNGER_OK &&
@@ -859,7 +862,6 @@ void Pokemon::save() {
     nvs_set_i32(handle, "happy", _happiness);
     nvs_set_i32(handle, "health", _health);
     nvs_set_i32(handle, "energy", _energy);
-    nvs_set_i32(handle, "sleep", _sleep);
     nvs_set_i32(handle, "hygiene", _hygiene);
     nvs_set_i32(handle, "dirt", _dirt);
     nvs_set_i32(handle, "age", _ageMinutes);
@@ -924,9 +926,6 @@ void Pokemon::load() {
     }
     if (nvs_get_i32(handle, "energy", &i32val) == ESP_OK) {
         _energy = i32val;
-    }
-    if (nvs_get_i32(handle, "sleep", &i32val) == ESP_OK) {
-        _sleep = i32val;
     }
     if (nvs_get_i32(handle, "hygiene", &i32val) == ESP_OK) {
         _hygiene = i32val;

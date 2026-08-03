@@ -102,14 +102,12 @@ static const char DEV_GUIDE_HTML[] PROGMEM = R"rawliteral(
   <button class="dev-btn" onclick="press('dirt','75')">Sujeira alta</button>
   <button class="dev-btn" onclick="press('dirt','100')">Sujinho</button>
 </div>
-<div class="dev-label">Barras (energia/sono/higiene):</div>
+<div class="dev-label">Barras (energia/higiene):</div>
 <div class="dev-grid">
   <button class="dev-btn" onclick="press('bar','0','-20')">Energia -20</button>
   <button class="dev-btn" onclick="press('bar','0','20')">Energia +20</button>
-  <button class="dev-btn" onclick="press('bar','1','-20')">Sono -20</button>
-  <button class="dev-btn" onclick="press('bar','1','20')">Sono +20</button>
-  <button class="dev-btn" onclick="press('bar','2','-20')">Higiene -20</button>
-  <button class="dev-btn" onclick="press('bar','2','20')">Higiene +20</button>
+  <button class="dev-btn" onclick="press('bar','1','-20')">Higiene -20</button>
+  <button class="dev-btn" onclick="press('bar','1','20')">Higiene +20</button>
 </div>
 <div class="dev-label">Sono:</div>
 <div class="dev-grid">
@@ -229,7 +227,6 @@ static uint32_t statsFingerprint() {
     h = (h ^ (uint32_t)pet.getHappiness()) * 16777619u;
     h = (h ^ (uint32_t)pet.getHealth()) * 16777619u;
     h = (h ^ (uint32_t)pet.getEnergy()) * 16777619u;
-    h = (h ^ (uint32_t)pet.getSleep()) * 16777619u;
     h = (h ^ (uint32_t)pet.getHygiene()) * 16777619u;
     h = (h ^ (uint32_t)pet.getDirt()) * 16777619u;
     h = (h ^ (uint32_t)pet.getLostCount()) * 16777619u;
@@ -520,8 +517,9 @@ void loop() {
         unsigned long elapsed = now - lastStatsUpdate;
         lastStatsUpdate = now;
 
-        // Dormindo: recupera energia/sono (alem do decay normal)
-        if (gameState == STATE_SLEEPING) {
+        // Dormindo: recupera energia (e custa fome/felicidade).
+        // Vale tambem no sono iniciado na tela de status (sem trocar de tela).
+        if (sleeping) {
             pet.sleepRecovery(elapsed);
         }
 
@@ -549,10 +547,17 @@ void loop() {
             }
         }
 
-        // Verifica alertas
+        // Verifica alertas. O aviso NUNCA rouba a tela escolhida pelo
+        // usuario (STATUS/SONO...) e so aparece na tela do pet depois de
+        // WARNING_GRACE_MS sem interacao: sem isso, com o pet critico,
+        // qualquer acao (alimentar, status, trocar pokemon via dev) era
+        // desfeita em < 1s, travando os inputs.
         if (pet.isCritical()) {
-            gameState = STATE_WARNING;
-            lastDisplayUpdate = 0;
+            if (gameState == STATE_IDLE &&
+                (now - lastInteraction >= WARNING_GRACE_MS)) {
+                gameState = STATE_WARNING;
+                lastDisplayUpdate = 0;
+            }
         } else if (gameState == STATE_WARNING) {
             gameState = STATE_IDLE;
             lastDisplayUpdate = 0;
@@ -663,13 +668,19 @@ void loop() {
     // ========================================
     // 5. SLEEP (economia de energia)
     // ========================================
-    if (!sleeping && !pet.isDead() &&
-        (now - lastInteraction >= SLEEP_AFTER_MS) &&
-        gameState != STATE_EVOLVING) {
+    // O pet comeca a dormir apos o tempo de inatividade, seja na tela do
+    // pet ou na de status. Na tela do pet entra o ciclo Zzz normal; na
+    // tela de status o sono comeca (recuperacao ativa) mas a tela NAO
+    // troca: o usuario continua vendo o status.
+    if (!sleeping && !pet.isDead() && !pet.isEgg() &&
+        (gameState == STATE_IDLE || gameState == STATE_STATS) &&
+        (now - lastInteraction >= SLEEP_AFTER_MS)) {
         sleeping = true;
-        gameState = STATE_SLEEPING;
-        sleepShowZzz = true;      // comeca sempre na tela de Zzz
         lastSleepSwitch = now;
+        if (gameState == STATE_IDLE) {
+            gameState = STATE_SLEEPING;
+            sleepShowZzz = true;      // comeca sempre na tela de Zzz
+        }
         lastDisplayUpdate = 0;
         Serial.println("Modo dormir...");
     }

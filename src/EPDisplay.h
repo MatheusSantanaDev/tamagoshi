@@ -2,9 +2,12 @@
 #define EPDISPLAY_H
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
 #include "config.h"
-#include "Pokemon.h"
 #include "EPGray.h"
+#include "Pokemon.h"
 
 // ============================================================
 // Acesso ao framebuffer 1bpp do GxEPD2_BW (privado). Em GRAY_MODE,
@@ -101,7 +104,9 @@ private:
     void drawPoops(const Pokemon& pet);
     void snapshotPet(const Pokemon& pet);
 
-    // Refreshes parciais
+    // Refreshes parciais. O desenho (buffer) acontece no loop principal;
+    // o push (lento, varios segundos) roda numa task separada, entao o
+    // loop nunca fica bloqueado esperando o painel.
     void pushPartialRegion(int16_t x, int16_t y, int16_t w, int16_t h);
     void updateBarPartial(int row, const char* label, int value, int maxVal);
     void updatePoopsPartial(const Pokemon& pet);
@@ -113,13 +118,31 @@ private:
 
     // Snapshot da tela do pet (para saber o que mudou)
     int _lastPetLvl;
-    int _lastPetBars[6];
+    int _lastPetBars[5];
     int _lastPetDirt;
     const unsigned char* _lastPetSprite;
     char _lastPetMsg[24];
 
     // Caixa do texto "lvl N" (refresh parcial justo, sem piscar area maior)
     int _lastLvlX = 0, _lastLvlW = 0;
+
+    // Fila de jobs do display: o loop principal enfileira regioes (e
+    // desenhos completos); a task de display drena e faz os pushes lentos.
+    // O conteudo e lido do framebuffer AO PUSHAR, entao re-enfileirar a
+    // mesma regiao e um no-op (a regiao pendente ja reflete o estado atual).
+    struct DisplayJob {
+        int16_t x, y, w, h;
+    };
+    static const int DISPLAY_JOB_MAX = 24;
+    DisplayJob _jobs[DISPLAY_JOB_MAX];
+    volatile int _jobHead = 0, _jobTail = 0;
+    volatile bool _fullPending = false;
+    SemaphoreHandle_t _jobSem = nullptr;
+    TaskHandle_t _taskHandle = nullptr;
+    void enqueueRegion(int16_t x, int16_t y, int16_t w, int16_t h);
+    void enqueueFull();
+    void displayTaskLoop();
+    static void displayTaskEntry(void* param);
 
     // "Zzz" perto da cabeca do sprite (modo dormir, fase pokemon)
     bool _sleepZzz = false;
